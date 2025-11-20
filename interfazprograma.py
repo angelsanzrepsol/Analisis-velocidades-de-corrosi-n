@@ -635,6 +635,46 @@ with tabs[0]:
     if uploaded_corr is None:
         st.info("Sube el archivo de corrosión en la barra lateral para comenzar.")
     else:
+        # ============================================================
+# BLOQUE ÚNICO Y CORRECTO PARA LEER EL EXCEL DE CORROSIÓN
+# ============================================================
+        
+        import tempfile
+        
+        corr_path = None
+        
+        # Crear archivo temporal con el Excel subido
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                tmp.write(uploaded_corr.getbuffer())
+                corr_path = tmp.name
+        except Exception as e:
+            st.error(f"No se pudo crear archivo temporal: {e}")
+            corr_path = None
+        
+        # Leer las hojas del archivo
+        hojas = []
+        if corr_path is not None:
+            try:
+                xls_corr = pd.ExcelFile(corr_path)
+                hojas = xls_corr.sheet_names
+            except Exception as e:
+                st.error(f"No se pudieron leer las hojas del archivo: {e}")
+                hojas = []
+        
+        if not hojas:
+            st.warning("No se encontraron hojas en el archivo subido.")
+        else:
+            hoja_sel = st.selectbox("Selecciona hoja", options=hojas)
+        
+            try:
+                df_original = pd.read_excel(corr_path, sheet_name=hoja_sel)
+                df_original.columns = [str(c) for c in df_original.columns]
+                st.success(f"Hoja cargada: {hoja_sel} — filas: {len(df_original)}")
+            except Exception as e:
+                st.error(f"No se pudo leer la hoja seleccionada: {e}")
+                df_original = pd.DataFrame()
+
         # BLOQUE ÚNICO: crear archivo temporal y leer hojas
         corr_path = None
         try:
