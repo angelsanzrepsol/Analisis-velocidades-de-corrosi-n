@@ -65,24 +65,6 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-st.markdown("""
-<style>
-/* Texto normal */
-html, body, [class*="st-"] {
-    color: #E8E8E8 !important;
-}
-
-/* Labels de inputs (number_input, selectbox, sliders…) */
-label, .css-16idsys, .css-1pndypt {
-    color: #F0F0F0 !important;
-}
-
-/* Títulos pequeños tipo “Recalcular segmento”, “Guardar/Exportar” */
-h1, h2, h3, h4, h5, h6 {
-    color: #FFFFFF !important;
-}
-</style>
-""", unsafe_allow_html=True)
 
 
 # intentar cargar logo
