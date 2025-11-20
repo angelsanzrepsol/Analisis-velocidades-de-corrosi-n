@@ -697,7 +697,7 @@ with tabs[0]:
     if uploaded_corr is None:
         st.info("Sube el archivo de corrosión en la barra lateral para comenzar.")
     else:
-# --- Crear archivo temporal a partir del archivo subido (solo una vez) ---
+        # Crear archivo temporal desde el archivo subido
         import tempfile
         
         corr_path = None
@@ -710,7 +710,7 @@ with tabs[0]:
             st.error(f"No se pudo crear archivo temporal: {e}")
             corr_path = None
         
-        # --- Leer hojas del archivo ---
+        # Leer hojas del Excel
         hojas = []
         if corr_path is not None:
             try:
@@ -719,36 +719,25 @@ with tabs[0]:
             except Exception as e:
                 st.error(f"No se pudieron leer las hojas del archivo: {e}")
                 hojas = []
+        
+        if not hojas:
+            st.warning("No se encontraron hojas en el archivo subido.")
         else:
-            hojas = []
+            hoja_sel = st.selectbox("Selecciona hoja", options=hojas, key="hoja_sel")
+        
+            try:
+                df_original = pd.read_excel(corr_path, sheet_name=hoja_sel)
+                df_original.columns = [str(c) for c in df_original.columns]
+                st.success(f"Hoja cargada: {hoja_sel} — filas: {len(df_original)}")
+            except Exception as e:
+                st.error(f"No se pudo leer la hoja seleccionada: {e}")
+                df_original = pd.DataFrame()
 
-        # --- Crear archivo temporal a partir del archivo subido (solo una vez) ---
 # --- Crear archivo temporal a partir del archivo subido (solo una vez) ---
         import tempfile
         
         corr_path = None
         
-        if uploaded_corr is not None:
-            try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                    tmp.write(uploaded_corr.getbuffer())
-                    corr_path = tmp.name
-            except Exception as e:
-                st.error(f"No se pudo crear archivo temporal: {e}")
-                corr_path = None
-
-# --- Leer hojas del archivo ---
-hojas = []
-if corr_path is not None:
-    try:
-        xls_corr = pd.ExcelFile(corr_path)
-        hojas = xls_corr.sheet_names
-    except Exception as e:
-        st.error(f"No se pudieron leer las hojas del archivo: {e}")
-        hojas = []
-else:
-    hojas = []
-
     
     # --- Leer hojas del archivo ---
     hojas = []
@@ -761,18 +750,6 @@ else:
             hojas = []
     else:
         hojas = []
-
-
-        # Ahora sí leer las hojas desde corr_path
-        if corr_path is not None:
-            try:
-                xls_corr = pd.ExcelFile(corr_path)
-                hojas = xls_corr.sheet_names
-            except Exception as e:
-                st.error(f"No se pudieron leer las hojas del archivo: {e}")
-                hojas = []
-        else:
-            hojas = []
 
         if not hojas:
             st.warning("No se encontraron hojas en el archivo subido.")
