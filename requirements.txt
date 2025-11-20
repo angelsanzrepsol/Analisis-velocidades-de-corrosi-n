@@ -1,4 +1,8 @@
 streamlit
 pandas
 numpy
+openpyxl
 matplotlib
+scipy
+plotly
+Pillow
