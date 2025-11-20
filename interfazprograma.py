@@ -114,15 +114,6 @@ h1, h2, h3, h4, h5, h6 {
 
 </style>
 """, unsafe_allow_html=True)
-import streamlit as st
-
-# Función para mostrar GIF mientras se ejecuta un proceso
-def run_with_loading(func, *args, **kwargs):
-    placeholder = st.empty()  # Contenedor temporal
-    placeholder.image("loading.gif", width=200)  # Mostramos el GIF
-    result = func(*args, **kwargs)  # Ejecutamos la función que tarda
-    placeholder.empty()  # Quitamos el GIF al terminar
-    return result
 
 # intentar cargar logo
 try:
@@ -752,10 +743,10 @@ with tabs[0]:
                     df_proc = None
                     vars_proceso = []
 
-                    df_filtrado, y_suave, cambios, segmentos_raw = run_with_loading(
-                        lambda: detectar_segmentos_wrapper(df_original, umbral_factor, umbral)
+                with st.spinner("Procesando y detectando segmentos..."):
+                    df_filtrado, y_suave, cambios, segmentos_raw = detectar_segmentos_wrapper(
+                        df_original, umbral_factor, umbral
                     )
-
                     if df_filtrado is None or y_suave is None:
                         st.error("No se pudieron detectar segmentos. Revisa las columnas (fecha/espesor) o ajusta umbrales.")
                     else:
