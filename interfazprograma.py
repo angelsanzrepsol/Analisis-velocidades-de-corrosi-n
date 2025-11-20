@@ -693,6 +693,7 @@ else:
 # -------------------- TAB 1: Procesar hoja (automático) --------------------
 with tabs[0]:
     st.header("Procesamiento de hoja")
+    hojas = []
 
     if uploaded_corr is None:
         st.info("Sube el archivo de corrosión en la barra lateral para comenzar.")
