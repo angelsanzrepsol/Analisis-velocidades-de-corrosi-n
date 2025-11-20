@@ -33,68 +33,55 @@ import matplotlib.dates as mdates
 st.set_page_config(page_title="Analizador de corrosión", layout="wide")
 st.title("Analizador de corrosión")
 
-st.markdown(
-    """
-    <style>
-    .stApp {
-        background-color: #1F2D3D;
-    }
-    h1, h2, h3, h4, h5, h6 {
-        color: #D98B3B !important;
-    }
-    .css-18e3th9, .css-16idsys, .css-10trblm {
-        color: #E4E4E4 !important;
-    }
-    section[data-testid="stSidebar"] {
-        background-color: #1F2D3D;
-    }
-    section[data-testid="stSidebar"] * {
-        color: #C7C7C7 !important;
-    }
-    .stButton>button {
-        background-color: #D98B3B;
-        color: white;
-        border-radius: 8px;
-        border: 1px solid #E4E4E4;
-    }
-    .stButton>button:hover {
-        background-color: #b57830;
-        color: white;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 st.markdown("""
 <style>
 
-/* ------------------------------
-   1. TITULOS DE LAS PESTAÑAS (TAB HEADERS)
-   ------------------------------ */
-.stTabs [data-baseweb="tab"] p {
-    color: white !important;        /* Texto de la pestaña en blanco */
-    font-weight: 600 !important;
+/* =========================================================
+   1. SELECTBOX, MULTISELECT, SLIDERS, NUMBER INPUT → letra gris oscuro
+   ========================================================= */
+.stSelectbox label,
+.stMultiSelect label,
+.stNumberInput label,
+.stSlider label,
+.stTextInput label {
+    color: #333333 !important;   /* gris oscuro */
 }
 
-/* Cuando la pestaña está seleccionada */
-.stTabs [aria-selected="true"] p {
-    color: white !important;
+.css-ocqkz7, .css-16idsys, .css-1pndypt, .css-1offfwp { 
+    color: #333333 !important;   /* textos internos gris oscuro */
+}
+
+/* =========================================================
+   2. TITULOS GRANDES → NARANJA (subheader, header, markdown ###)
+   ========================================================= */
+h1, h2, h3, h4, h5, h6 {
+    color: #D98B3B !important;  /* naranja Repsol */
     font-weight: 700 !important;
 }
 
-/* ------------------------------
-   2. TEXTO DEL CUERPO (headers, markdown, info general)
-   ------------------------------ */
-h1, h2, h3, h4, h5, h6,
-p, span, label, div, article {
-    color: white !important;
+/* =========================================================
+   3. PESTAÑAS
+   - texto normal = como estaba
+   - pestaña seleccionada = ROJO
+   ========================================================= */
+
+/* Texto de pestañas NORMAL */
+.stTabs [data-baseweb="tab"] p {
+    color: #E0E0E0 !important;        /* un gris clarito */
+    font-weight: 600 !important;
 }
 
-/* ------------------------------
-   3. NO TOCAR: Botones siguen naranjas
-   ------------------------------ */
+/* Texto de pestaña SELECCIONADA */
+.stTabs [aria-selected="true"] p {
+    color: red !important;            /* ROJO como querías */
+    font-weight: 700 !important;
+}
+
+/* =========================================================
+   4. Botones SIGUEN NARANJA (NO tocar)
+   ========================================================= */
 .stButton>button {
-    background-color: #D98B3B !important;
+    background-color: #D98B3B !important; 
     color: white !important;
     border-radius: 8px;
 }
