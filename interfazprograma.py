@@ -65,6 +65,25 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+st.markdown("""
+<style>
+/* Texto normal */
+html, body, [class*="st-"] {
+    color: #E8E8E8 !important;
+}
+
+/* Labels de inputs (number_input, selectbox, sliders…) */
+label, .css-16idsys, .css-1pndypt {
+    color: #F0F0F0 !important;
+}
+
+/* Títulos pequeños tipo “Recalcular segmento”, “Guardar/Exportar” */
+h1, h2, h3, h4, h5, h6 {
+    color: #FFFFFF !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 # intentar cargar logo
 try:
@@ -674,40 +693,6 @@ with tabs[0]:
             except Exception as e:
                 st.error(f"No se pudo leer la hoja seleccionada: {e}")
                 df_original = pd.DataFrame()
-
-        # BLOQUE ÚNICO: crear archivo temporal y leer hojas
-        corr_path = None
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                tmp.write(uploaded_corr.getbuffer())
-                corr_path = tmp.name
-        except Exception as e:
-            st.error(f"No se pudo crear archivo temporal: {e}")
-            corr_path = None
-
-        hojas = []
-        if corr_path is not None:
-            try:
-                xls_corr = pd.ExcelFile(corr_path)
-                hojas = xls_corr.sheet_names
-            except Exception as e:
-                st.error(f"No se pudieron leer las hojas del archivo: {e}")
-                hojas = []
-
-        if not hojas:
-            st.warning("No se encontraron hojas en el archivo subido.")
-        else:
-            hoja_sel = st.selectbox("Selecciona hoja", options=hojas, key="hoja_sel")
-
-            try:
-                df_original = pd.read_excel(corr_path, sheet_name=hoja_sel)
-                df_original.columns = [str(c) for c in df_original.columns]
-                st.success(f"Hoja cargada: {hoja_sel} — filas: {len(df_original)}")
-            except Exception as e:
-                st.error(f"No se pudo leer la hoja seleccionada: {e}")
-                df_original = pd.DataFrame()
-
-            if df_original is not None and not df_original.empty:
                 st.write("Los parámetros que cambies a continuación recalcularán automáticamente la gráfica y segmentos.")
                 col1, col2 = st.columns([3,1])
                 with col1:
