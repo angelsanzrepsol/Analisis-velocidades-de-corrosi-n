@@ -31,7 +31,7 @@ import matplotlib.dates as mdates
 
 # Configuración básica y estilo
 st.set_page_config(page_title="Analizador de corrosión", layout="wide")
-st.markdown("<h1 class='darkblue-title'>Analizado de corrosión</h1>", unsafe_allow_html=True)
+st.markdown("<h1 class='darkblue-title'>Analísis de corrosión</h1>", unsafe_allow_html=True)
 
 st.markdown("""
 <style>
