@@ -1152,7 +1152,8 @@ if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
 
     with zipfile.ZipFile(zip_buffer, "w") as z:
 
-        for key, data in st.session_state["processed_sheets"].items():
+        saved_items = {k: v for k, v in st.session_state["processed_sheets"].items() if v.get("saved")}
+        for key, data in saved_items.items():
 
             nombre_base = f"{data['source_name']}_{data['hoja']}"
             carpeta = export_dir / nombre_base
