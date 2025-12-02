@@ -1135,6 +1135,112 @@ with tabs[2]:
                 st.info("No se encontraron variables de proceso en los segmentos.")
         else:
             st.write("No hay segmentos válidos para este procesado.")
+st.markdown("---")
+st.subheader("Exportación masiva")
+
+if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
+
+    from PIL import Image, ImageDraw
+    import zipfile
+    import math
+
+    export_dir = Path.cwd() / "export_todo"
+    export_dir.mkdir(exist_ok=True)
+
+    zip_path = export_dir / "export_completo.zip"
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w") as z:
+
+        for key, data in st.session_state["processed_sheets"].items():
+
+            nombre_base = f"{data['source_name']}_{data['hoja']}"
+            carpeta = export_dir / nombre_base
+            carpeta.mkdir(exist_ok=True)
+
+            # ==========================
+            # 1) Exportar GRÁFICA GLOBAL
+            # ==========================
+            fig, ax = dibujar_grafica_completa_wrapper(
+                data['df_filtrado'], data['y_suave'],
+                data['segmentos_validos'], data['descartados'], [],
+                titulo=f"{data['hoja']}", figsize=(14,10)
+            )
+
+            img_global_path = carpeta / f"{nombre_base}_grafica.png"
+            fig.savefig(img_global_path, dpi=200, bbox_inches="tight")
+            plt.close(fig)
+            z.write(img_global_path, arcname=f"{nombre_base}/{img_global_path.name}")
+
+            # ==========================================
+            # 2) Excel por hoja con segmentos y variables
+            # ==========================================
+            rows = []
+            for idx,s in enumerate(data['segmentos_validos'], start=1):
+                row = {
+                    'Segmento': idx,
+                    'Inicio': s.get('fecha_ini'),
+                    'Fin': s.get('fecha_fin'),
+                    'Días': s.get('delta_dias'),
+                    'Vel (mm/año)': s.get('vel_abs')
+                }
+                medias = s.get('medias')
+                if medias is not None and isinstance(medias, (pd.Series, dict)):
+                    for var,val in (medias.items() if isinstance(medias, dict) else medias.items()):
+                        row[var] = val
+                rows.append(row)
+
+            df_x = pd.DataFrame(rows)
+            excel_path = carpeta / f"{nombre_base}_segmentos.xlsx"
+            df_x.to_excel(excel_path, index=False)
+            z.write(excel_path, arcname=f"{nombre_base}/{excel_path.name}")
+
+            # ================================
+            # 3) Collage de segmentos por hoja
+            # ================================
+            imagenes_segmentos = []
+            for idx,s in enumerate(data['segmentos_validos'], start=1):
+                i, f = int(s["ini"]), int(s["fin"])
+                fig_seg, ax_seg = plt.subplots(figsize=(6,4))
+                x = pd.to_datetime(data['df_filtrado']["Sent Time"].iloc[i:f])
+                y = data['y_suave'][i:f]
+                ax_seg.plot(x, y)
+                ax_seg.set_title(f"Segmento {idx} – {s['vel_abs']:.4f} mm/año")
+                ax_seg.tick_params(axis='x', rotation=90)
+                seg_path = carpeta / f"seg_{idx}.png"
+                fig_seg.savefig(seg_path, dpi=150, bbox_inches="tight")
+                plt.close(fig_seg)
+
+                try:
+                    imagenes_segmentos.append(Image.open(seg_path))
+                except:
+                    pass
+
+            if imagenes_segmentos:
+                cols = 2
+                filas = math.ceil(len(imagenes_segmentos) / cols)
+                w, h = imagenes_segmentos[0].size
+                collage = Image.new("RGB", (cols*w, filas*h), "white")
+
+                for n,img in enumerate(imagenes_segmentos):
+                    fila = n // cols
+                    col = n % cols
+                    collage.paste(img, (col*w, fila*h))
+
+                collage_path = carpeta / f"{nombre_base}_collage.png"
+                collage.save(collage_path)
+                z.write(collage_path, arcname=f"{nombre_base}/{collage_path.name}")
+
+    zip_buffer.seek(0)
+
+    st.download_button(
+        "⬇️ Descargar ZIP completo",
+        data=zip_buffer,
+        file_name="export_completo.zip",
+        mime="application/zip"
+    )
+
+    st.success("Exportación completa generada.")
 
 # -------------------- Footer --------------------
 st.markdown("---")
