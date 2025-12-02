@@ -743,7 +743,7 @@ with tabs[0]:
                 if not hojas:
                     st.warning("No se encontraron hojas en el archivo subido.")
                 else:
-                    hoja_sel = st.selectbox("Selecciona hoja", options=hojas)
+                    hoja_sel = st.selectbox("Selecciona hoja", options=hojas, key="selectbox_hoja_corr")
                     df_original = hojas_dict[hoja_sel]
 
             except Exception as e:
