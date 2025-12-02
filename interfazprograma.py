@@ -1230,6 +1230,66 @@ if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
                 collage_path = carpeta / f"{nombre_base}_collage.png"
                 collage.save(collage_path)
                 z.write(collage_path, arcname=f"{nombre_base}/{collage_path.name}")
+                
+            # ==========================================
+            # 4) Gráficas de variables de proceso vs velocidad
+            # ==========================================
+            df_medias = pd.DataFrame([
+                {"Segmento": i+1, "Velocidad (mm/año)": s.get("vel_abs"), **(s.get("medias", {}))}
+                for i, s in enumerate(data["segmentos_validos"]) if s.get("estado") == "valido"
+            ])
+            
+            if not df_medias.empty:
+                columnas_vars = [c for c in df_medias.columns if c not in ["Segmento", "Velocidad (mm/año)"]]
+                for var in columnas_vars:
+                    fig_proc, ax_proc = plt.subplots(figsize=(6, 4))
+                    ax_proc.scatter(df_medias["Velocidad (mm/año)"], df_medias[var], alpha=0.7)
+                    ax_proc.set_xlabel("Velocidad de corrosión (mm/año)")
+                    ax_proc.set_ylabel(var)
+                    ax_proc.grid(True, alpha=0.4)
+                    ax_proc.set_title(f"{var} vs Velocidad")
+                    proc_path = carpeta / f"{nombre_base}_{var}_vs_velocidad.png"
+                    fig_proc.savefig(proc_path, dpi=150, bbox_inches="tight")
+                    plt.close(fig_proc)
+                    z.write(proc_path, arcname=f"{nombre_base}/{proc_path.name}")
+
+            # ==========================================
+            # 5) Collage de todas las gráficas de proceso vs velocidad
+            # ==========================================
+            imagenes_proceso = []
+            
+            if not df_medias.empty:
+                columnas_vars = [c for c in df_medias.columns if c not in ["Segmento", "Velocidad (mm/año)"]]
+                for var in columnas_vars:
+                    fig_proc, ax_proc = plt.subplots(figsize=(6, 4))
+                    ax_proc.scatter(df_medias["Velocidad (mm/año)"], df_medias[var], alpha=0.7)
+                    ax_proc.set_xlabel("Velocidad de corrosión (mm/año)")
+                    ax_proc.set_ylabel(var)
+                    ax_proc.grid(True, alpha=0.4)
+                    ax_proc.set_title(f"{var} vs Velocidad")
+                    proc_path = carpeta / f"{nombre_base}_{var}_vs_velocidad.png"
+                    fig_proc.savefig(proc_path, dpi=150, bbox_inches="tight")
+                    plt.close(fig_proc)
+                    try:
+                        imagenes_proceso.append(Image.open(proc_path))
+                    except:
+                        pass
+            
+            # Crear collage si hay imágenes
+            if imagenes_proceso:
+                cols = 2
+                filas = math.ceil(len(imagenes_proceso) / cols)
+                w, h = imagenes_proceso[0].size
+                collage_proc = Image.new("RGB", (cols*w, filas*h), "white")
+            
+                for n, img in enumerate(imagenes_proceso):
+                    fila = n // cols
+                    col = n % cols
+                    collage_proc.paste(img, (col*w, fila*h))
+            
+                collage_proc_path = carpeta / f"{nombre_base}_collage_proceso.png"
+                collage_proc.save(collage_proc_path)
+                z.write(collage_proc_path, arcname=f"{nombre_base}/{collage_proc_path.name}")
 
     zip_buffer.seek(0)
 
