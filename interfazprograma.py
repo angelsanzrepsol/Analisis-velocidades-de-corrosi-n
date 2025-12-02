@@ -717,63 +717,39 @@ with tabs[0]:
     else:
 
 # ============================================================
-# BLOQUE: aceptar ZIP o Excel como archivo de corrosión (robusto)
+# Aceptar ZIP o Excel como archivo de corrosión
 # ============================================================
-
-        corr_path = None
-
+            corr_path = None
 if uploaded_corr is not None:
-    # 1) Si la función de conversión no está disponible -> avisar
-    if uploaded_corr.name.lower().endswith(".zip") and zip_csvs_to_excel is None:
-        st.sidebar.error("No se encontró la función zip_csvs_to_excel. Asegúrate de que ampliación1.py exista y defina zip_csvs_to_excel().")
-        corr_path = None
-    else:
+
+    # ZIP → convertir a Excel
+    if uploaded_corr.name.lower().endswith(".zip"):
+
+        st.sidebar.info("ZIP detectado → convirtiendo a Excel...")
+
+        # Guardar ZIP temporal
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_zip:
+            tmp_zip.write(uploaded_corr.getbuffer())
+            zip_temp_path = tmp_zip.name
+
+        # Crear Excel temporal
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_xlsx:
+            excel_temp_path = tmp_xlsx.name
+
+        # Convertir
         try:
-            # Si es ZIP -> convertir a Excel temporal
-            if uploaded_corr.name.lower().endswith(".zip"):
-                st.sidebar.info("ZIP detectado → convirtiendo a Excel...")
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_zip:
-                    tmp_zip.write(uploaded_corr.getbuffer())
-                    zip_temp_path = tmp_zip.name
-
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_excel:
-                    excel_temp_path = tmp_excel.name
-
-                # Llamada segura a la función (puede lanzar)
-                try:
-                    zip_csvs_to_excel(zip_temp_path, excel_temp_path)
-                    corr_path = excel_temp_path
-                    st.sidebar.success("ZIP convertido correctamente a Excel.")
-                except Exception as e:
-                    st.sidebar.error(f"Error en zip_csvs_to_excel(): {e}")
-                    corr_path = None
-
-                # opcional: eliminar zip temporal
-                try:
-                    os.remove(zip_temp_path)
-                except Exception:
-                    pass
-
-            # Si es XLSX -> usarlo directamente
-            else:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                    tmp.write(uploaded_corr.getbuffer())
-                    corr_path = tmp.name
+            zip_csvs_to_excel(zip_temp_path, excel_temp_path)
+            corr_path = excel_temp_path
+            st.sidebar.success("ZIP convertido correctamente.")
         except Exception as e:
-            st.error(f"Error procesando el archivo subido: {e}")
+            st.sidebar.error(f"Error convirtiendo ZIP: {e}")
             corr_path = None
 
-# Si no hay archivo válido, informar al usuario y detener el procesamiento posterior
-if corr_path is None:
-    st.warning("No se ha cargado un archivo de corrosión válido aún. Sube un .xlsx o un .zip con CSVs.")
-else:
-    # A partir de aquí corr_path apunta a un .xlsx temporal válido — el resto de tu flujo puede leerlo
-    try:
-        xls_corr = pd.ExcelFile(corr_path)
-        hojas = xls_corr.sheet_names
-    except Exception as e:
-        st.error(f"No se pudieron leer las hojas del archivo: {e}")
-        hojas = []
+    # XLSX → usar directo
+    else:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+            tmp.write(uploaded_corr.getbuffer())
+            corr_path = tmp.name
 
         
         # Leer las hojas del archivo
