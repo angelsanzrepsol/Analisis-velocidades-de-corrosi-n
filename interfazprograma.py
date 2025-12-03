@@ -34,6 +34,22 @@ import zipfile
 import pandas as pd
 import io
 
+import re
+
+def make_safe_slug(text: str, max_len: int = 120) -> str:
+    """
+    Convierte un nombre arbitrario en uno seguro para rutas/archivos:
+    - Minúsculas
+    - Sustituye espacios por '_'
+    - Elimina caracteres problemáticos (/ \ : * ? " < > |)
+    - Compacta guiones bajos repetidos
+    """
+    t = (text or "").strip().lower()
+    t = t.replace(" ", "_")
+    t = re.sub(r'[\/\\:\*\?"<>\|]+', '', t)  # quita caracteres no válidos
+    t = re.sub(r'__+', '_', t)               # compacta underscores
+    return t[:max_len] or "sin_nombre"
+
 def leer_archivo(uploaded_file):
     hojas_dict = {}
 
@@ -937,7 +953,28 @@ with tabs[0]:
                                 data_now = st.session_state["processed_sheets"][key]
                                 out_dir = Path.cwd() / "procesados_finales"
                                 out_dir.mkdir(exist_ok=True)
-                                pkl_path = out_dir / f"{data_now['source_name']}_{data_now['hoja']}_procesado.pkl"
+                                
+                                import re
+                                
+                                def make_safe_name(text: str) -> str:
+                                    text = text.strip()
+                                    text = re.sub(r'[\/\\:\*\?"<>\|]+', '', text)  # quita caracteres no válidos
+                                    text = text.replace(' ', '_')
+                                    return text
+                                
+                                # Nombres seguros
+                                safe_source = make_safe_name(data_now['source_name'])
+                                safe_sheet = make_safe_name(data_now['hoja'])
+                                folder_name = f"{safe_source}_{safe_sheet}"
+                                
+                                # Carpeta específica
+                                out_dir = Path.cwd() / "procesados_finales" / folder_name
+                                out_dir.mkdir(parents=True, exist_ok=True)
+                                
+                                # Rutas finales
+                                pkl_path = out_dir / f"{folder_name}_procesado.pkl"
+                                figpath = out_dir / f"{folder_name}_grafica.png"
+                                
                                 try:
                                     datos_guardar = {
                                         "df_filtrado": data_now['df_filtrado'],
@@ -948,9 +985,7 @@ with tabs[0]:
                                     }
                                     with open(pkl_path, "wb") as f:
                                         pickle.dump(datos_guardar, f)
-                                    img_dir = Path.cwd() / "graficos_exportados"
-                                    img_dir.mkdir(exist_ok=True)
-                                    figpath = img_dir / f"{data_now['source_name']}_{data_now['hoja']}_grafica.png"
+
                                     try:
                                         fig_save, ax_save = dibujar_grafica_completa_wrapper(
                                             data_now['df_filtrado'], data_now['y_suave'],
