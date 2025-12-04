@@ -1262,9 +1262,12 @@ if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
         saved_items = {k: v for k, v in st.session_state["processed_sheets"].items() if v.get("saved")}
         for key, data in saved_items.items():
 
-            nombre_base = f"{data['source_name']}_{data['hoja']}"
+            safe_source = make_safe_name(data["source_name"])
+            safe_sheet = make_safe_name(data["hoja"])
+            nombre_base = f"{safe_source}_{safe_sheet}"
+            
             carpeta = export_dir / nombre_base
-            carpeta.mkdir(exist_ok=True)
+            carpeta.mkdir(parents=True, exist_ok=True)
 
             # ==========================
             # 1) Exportar GRÁFICA GLOBAL
