@@ -737,7 +737,61 @@ if uploaded_proc is not None:
         if cargar_datos_proceso_fn is not None:
             df_proc, vars_proceso = cargar_datos_proceso_fn(tmp_proc_path)
         else:
-            df_proc = pd.read_excel(tmp_proc_path)
+           
+            NA_STRINGS = [
+                "[-11059] No Good Data For Calculation",
+                "[ -11059 ] No Good Data For Calculation",
+                "No Good Data For Calculation",
+                "#DIV/0!", "#N/A", "#VALUE!", "-", "nan", "NaN", ""
+            ]
+            raw = pd.read_excel(tmp_proc_path, header=None, dtype=str, engine="openpyxl",
+                                na_values=NA_STRINGS, keep_default_na=True)
+            
+            # Localizar fila de inicio (primera con 'fecha' válida: serial Excel o fecha)
+            def is_excel_serial(x):
+                try:
+                    v = float(str(x).replace(",", "."))
+                    return 20000 <= v <= 50000
+                except:
+                    return False
+            
+            def is_date_like(x):
+                if is_excel_serial(x):
+                    return True
+                try:
+                    return pd.to_datetime(x, errors="coerce") is not pd.NaT
+                except:
+                    return False
+            
+            cands = raw.index[raw.iloc[:,0].apply(is_date_like)]
+            if len(cands) == 0:
+                st.sidebar.error("No se encontró bloque con fechas en el archivo de proceso.")
+            else:
+                start = int(cands.min())
+                data = raw.iloc[start:].reset_index(drop=True)
+                cols = ["Fecha"] + [f"Var_{i}" for i in range(1, data.shape[1])]
+                data.columns = cols[:data.shape[1]]
+            
+                fecha_num = pd.to_numeric(data["Fecha"].str.replace(",", ".", regex=False), errors="coerce")
+                if (fecha_num.notna().sum() / len(data)) > 0.6:
+                    data["Fecha"] = pd.to_datetime(fecha_num, unit="d", origin="1899-12-30")
+                else:
+                    data["Fecha"] = pd.to_datetime(data["Fecha"], errors="coerce")
+                data = data.dropna(subset=["Fecha"])
+            
+                for c in data.columns:
+                    if c == "Fecha": continue
+                    data[c] = pd.to_numeric(data[c].str.replace(",", ".", regex=False), errors="coerce")
+            
+                # Quitar columnas vacías
+                var_cols = [c for c in data.columns if c != "Fecha" and data[c].notna().sum() > 0]
+            
+                # Normalizar a la estructura que espera tu app
+                df_proc = data[["Fecha"] + var_cols].sort_values("Fecha").reset_index(drop=True)
+                vars_proceso = var_cols
+                st.session_state["df_proc"] = df_proc
+                st.session_state["vars_proceso"] = vars_proceso
+
             vars_proceso = [c for c in df_proc.columns if "fecha" not in c.lower()]
 
         fecha_col = None
