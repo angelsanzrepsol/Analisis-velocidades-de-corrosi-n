@@ -786,22 +786,28 @@ if uploaded_proc is not None:
             # 🔧 LIMPIEZA GLOBAL PARA EVITAR EL ERROR DEL EXCEL
             # -------------------------------------------------------
             
-            # Convertir todo primero a string (para evitar objetos raros)
-            df_proc = df_proc.applymap(
-                lambda x: str(x).strip() if not isinstance(x, float) and not pd.isna(x) else x
-            )
+            def limpiar_celda(x):
+                # Dejar pasar valores normales
+                if isinstance(x, (int, float, str)) or pd.isna(x):
+                    return x
             
-            # Reemplazar strings vacíos y símbolos por NaN real
+                # Si es lista, tuple, dict, array, objeto extraño → eliminarlo
+                try:
+                    if hasattr(x, "__iter__") and not isinstance(x, (bytes, str)):
+                        return np.nan
+                except:
+                    pass
+            
+                return np.nan
+            
+            # Aplicar limpieza a todas las celdas
+            df_proc = df_proc.applymap(limpiar_celda)
+            
+            # Reemplazar strings vacíos o representaciones de NaN por NaN real
             df_proc = df_proc.replace(
                 ["nan", "NaN", "None", "<NA>", "N/A", "NA", "", " "],
                 np.nan
             )
-            
-            # Asegurar que ninguna celda sea array/lista/objeto → si lo es, poner NaN
-            for c in df_proc.columns:
-                df_proc[c] = df_proc[c].apply(
-                    lambda x: x if isinstance(x, (str, float, int, np.number)) or pd.isna(x) else np.nan
-                )
 
         fecha_col = None
         for c in df_proc.columns:
