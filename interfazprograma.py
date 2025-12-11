@@ -40,6 +40,21 @@ def cargar_proceso_primera_hoja_limpio(path_excel):
 
     # Leer primera hoja completa
     df_raw = pd.read_excel(path_excel, sheet_name=0, header=None)
+    
+    # 🔧 LIMPIEZA BRUTAL PARA EVITAR ERRORES DEL EXCELç
+    # 🔧 Limpieza total antes de cualquier operación
+    def limpiar_celda(x):
+        if isinstance(x, (int, float, str)) or pd.isna(x):
+            return x
+        return np.nan  # listas/arrays/objetos → NaN
+
+    df_raw = df_raw.applymap(limpiar_celda)
+
+    df_raw = df_raw.replace(
+        ["nan", "NaN", "None", "<NA>", "N/A", "NA", "", " "],
+        np.nan
+    )
+
 
     # Buscar la primera fila que contenga al menos un número (datos reales)
     fila_inicio = None
