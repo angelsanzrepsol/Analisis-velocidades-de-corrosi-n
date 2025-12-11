@@ -39,27 +39,44 @@ import re
 def cargar_proceso_primera_hoja_limpio(path_excel):
 
     # Leer primera hoja completa
-    df_raw = pd.read_excel(path_excel, sheet_name=0)
+    df_raw = pd.read_excel(path_excel, sheet_name=0, header=None)
 
-    # ❗ Tu archivo tiene cabeceras en las primeras 3 filas
-    # Los datos reales empiezan en la fila 3 (media) y 4 (desviación)
-    df = df_raw.iloc[3:].reset_index(drop=True)
+    # Buscar la primera fila que contenga al menos un número (datos reales)
+    fila_inicio = None
+    for i in range(len(df_raw)):
+        fila = df_raw.iloc[i]
+        # Si alguna celda es numérica → esta fila es inicio
+        if fila.apply(lambda x: isinstance(x, (int,float)) or str(x).replace('.', '', 1).isdigit()).any():
+            fila_inicio = i
+            break
 
-    # Rellenar nombres de columnas
-    df.columns = [f"Var_{i}" if "Unnamed" in str(c) else str(c) for i, c in enumerate(df_raw.columns)]
+    if fila_inicio is None:
+        raise ValueError("No se encontraron filas con datos numéricos en el archivo de proceso.")
 
-    # Crear fecha artificial porque tu archivo NO la tiene
-    df["Fecha"] = pd.date_range(start="2000-01-01", periods=len(df), freq="D")
+    # Usamos esa fila como cabecera
+    df_raw.columns = [str(c).strip() for c in df_raw.iloc[fila_inicio]]
+    df = df_raw.iloc[fila_inicio+1:].reset_index(drop=True)
 
-    # Convertir todas las columnas a numérico excepto Fecha
+    # Reemplazar columnas vacías por nombres seguros
+    df.columns = [f"Var_{i}" if c == "" or c.lower().startswith("unnamed") else c for i,c in enumerate(df.columns)]
+
+    # Crear columna fecha artificial si no existe
+    if "Fecha" not in df.columns:
+        df["Fecha"] = pd.date_range(start="2000-01-01", periods=len(df), freq="D")
+
+    # Convertir todo lo posible a numérico
     for c in df.columns:
         if c != "Fecha":
-            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+            df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # Variables de proceso = todas menos Fecha
+    # Quitar columnas completamente vacías
+    df = df.dropna(axis=1, how="all")
+
+    # Variables de proceso (todas menos fecha)
     vars_proceso = [c for c in df.columns if c != "Fecha"]
 
     return df, vars_proceso
+
 
 
 def make_safe_name(text: str) -> str:
