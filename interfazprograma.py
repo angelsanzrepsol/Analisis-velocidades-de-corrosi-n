@@ -36,6 +36,95 @@ import io
 
 import re
 
+def procesar_crudos(df):
+
+    df = df.copy()
+
+    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+
+    perc_cols = [f"12.Carga.RA.PORCCOMP{i}" for i in range(1, 8)]
+    comp_cols = [f"12.Carga.RA.COMP{i}" for i in range(1, 8)]
+
+    df[perc_cols] = df[perc_cols].apply(pd.to_numeric, errors="coerce")
+
+    df["Suma_COMP"] = df[perc_cols].sum(axis=1)
+
+    df["SLOP"] = np.where(df["Suma_COMP"] < 100, 100 - df["Suma_COMP"], 0)
+
+    records = []
+
+    for i in range(7):
+
+        tmp = df[["Fecha", perc_cols[i], comp_cols[i]]].copy()
+        tmp.columns = ["Fecha", "Porcentaje", "Especie"]
+
+        tmp["COMP"] = f"COMP{i+1}"
+
+        records.append(tmp)
+
+    detalle = pd.concat(records, ignore_index=True)
+
+    detalle = detalle.dropna(subset=["Porcentaje"])
+    detalle = detalle[detalle["Especie"] != "-"]
+
+    # Añadir SLOP como crudo
+    slop = df[["Fecha", "SLOP"]].copy()
+    slop = slop[slop["SLOP"] > 0]
+
+    slop["COMP"] = "SLOP"
+    slop["Especie"] = "SLOP"
+    slop.columns = ["Fecha", "Porcentaje", "COMP", "Especie"]
+
+    detalle = pd.concat([detalle, slop], ignore_index=True)
+
+    return detalle
+
+def asignar_crudos_a_segmentos(detalle_crudos, processed_sheets):
+
+    resultados = []
+
+    for key, data in processed_sheets.items():
+
+        if not data.get("saved"):
+            continue
+
+        sonda = data["source_name"]
+        hoja = data["hoja"]
+
+        for i, seg in enumerate(data["segmentos_validos"], start=1):
+
+            fi = pd.to_datetime(seg["fecha_ini"])
+            ff = pd.to_datetime(seg["fecha_fin"])
+
+            sub = detalle_crudos[
+                (detalle_crudos["Fecha"] >= fi) &
+                (detalle_crudos["Fecha"] <= ff)
+            ]
+
+            if sub.empty:
+                continue
+
+            resumen = (
+                sub.groupby("Especie")["Porcentaje"]
+                .mean()
+                .reset_index()
+            )
+
+            resumen["Segmento"] = i
+            resumen["Sonda"] = sonda
+            resumen["Hoja"] = hoja
+            resumen["Fecha_inicio"] = fi
+            resumen["Fecha_fin"] = ff
+            resumen["Velocidad"] = seg.get("vel_abs")
+
+            resultados.append(resumen)
+
+    if resultados:
+        return pd.concat(resultados, ignore_index=True)
+
+    return pd.DataFrame()
+
+
 def cargar_proceso_primera_hoja_limpio(path_excel):
 
     # Leer primera hoja completa
@@ -286,6 +375,11 @@ def safe_get(fn_name):
 st.sidebar.header("Entradas y parámetros")
 uploaded_corr = st.sidebar.file_uploader("Archivo de corrosión (.xlsx)", type=None, key="file_uploader_corr")
 uploaded_proc = st.sidebar.file_uploader("Archivo de proceso (.xlsx) — opcional", type=None, key="file_uploader_proc")
+uploaded_crudos = st.sidebar.file_uploader(
+    "Archivo de crudos de petróleo (.xlsx) — opcional",
+    type=None,
+    key="file_uploader_crudos"
+)
 
 st.sidebar.markdown("---")
 
@@ -795,7 +889,13 @@ if "processed_sheets" not in st.session_state:
     st.session_state["processed_sheets"] = {}
 
 # -------------------- Pestañas UI --------------------
-tabs = st.tabs(["Procesar hoja", "Combinar hojas", "Revisión / Guardado"])
+tabs = st.tabs([
+    "Procesar hoja",
+    "Combinar hojas",
+    "Revisión / Guardado",
+    "Crudos"
+])
+
 
 # -------------------- Cargar y preparar datos de proceso --------------------
 df_proc = None
@@ -1548,6 +1648,49 @@ if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
     )
 
     st.success("Exportación completa generada.")
+# -------------------- TAB 4: CRUDOS --------------------
+with tabs[3]:
+
+    st.header("Crudos vs Segmentos")
+
+    if uploaded_crudos is None:
+        st.info("Sube Excel de crudos")
+
+    else:
+
+        hojas = leer_archivo(uploaded_crudos)
+
+        hoja_sel = st.selectbox("Hoja crudos", list(hojas.keys()))
+
+        df_crudos = hojas[hoja_sel]
+
+        detalle_crudos = procesar_crudos(df_crudos)
+
+        st.subheader("Detalle diario crudos")
+        st.dataframe(detalle_crudos)
+
+        if st.session_state.get("processed_sheets"):
+
+            df_final = asignar_crudos_a_segmentos(
+                detalle_crudos,
+                st.session_state["processed_sheets"]
+            )
+
+            if not df_final.empty:
+
+                st.subheader("Promedio crudos por segmento")
+                st.dataframe(df_final)
+
+                buf = io.BytesIO()
+                df_final.to_excel(buf, index=False)
+                buf.seek(0)
+
+                st.download_button(
+                    "Descargar resultado",
+                    buf,
+                    file_name="crudos_vs_segmentos.xlsx"
+                )
+
 
 # -------------------- Footer --------------------
 st.markdown("---")
