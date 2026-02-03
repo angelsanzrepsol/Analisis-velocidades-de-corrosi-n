@@ -40,45 +40,43 @@ def procesar_crudos(df):
 
     df = df.copy()
 
+    # LIMPIAR NOMBRES DE COLUMNAS
+    df.columns = [str(c).strip() for c in df.columns]
+
     df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
 
     detalle_list = []
 
-    for i in range(1, 8):
+    # Detectar dinámicamente columnas COMP y PORC
+    comp_cols = [c for c in df.columns if "COMP" in c and "PORC" not in c]
+    porc_cols = [c for c in df.columns if "PORCCOMP" in c]
 
-        col_comp = f"12.Carga.RA.COMP{i}"
-        col_perc = f"12.Carga.RA.PORCCOMP{i}"
+    comp_cols = sorted(comp_cols)
+    porc_cols = sorted(porc_cols)
 
-        if col_comp not in df.columns or col_perc not in df.columns:
-            continue
+    for comp_col, porc_col in zip(comp_cols, porc_cols):
 
         tmp = pd.DataFrame({
             "Fecha": df["Fecha"],
-            "COMP": f"COMP{i}",
-            "Especie": df[col_comp],
-            "Porcentaje": pd.to_numeric(df[col_perc], errors="coerce")
+            "COMP": comp_col,
+            "Especie": df[comp_col],
+            "Porcentaje": pd.to_numeric(df[porc_col], errors="coerce")
         })
 
         detalle_list.append(tmp)
 
     detalle = pd.concat(detalle_list, ignore_index=True)
 
-    # Limpiar valores inválidos
     detalle = detalle.dropna(subset=["Porcentaje"])
     detalle = detalle[detalle["Especie"].notna()]
     detalle = detalle[detalle["Especie"] != "-"]
 
     # ===== CALCULAR SLOP =====
-    perc_cols = [f"12.Carga.RA.PORCCOMP{i}" for i in range(1, 8)]
-    df[perc_cols] = df[perc_cols].apply(pd.to_numeric, errors="coerce")
+    df[porc_cols] = df[porc_cols].apply(pd.to_numeric, errors="coerce")
 
-    df["Suma_COMP"] = df[perc_cols].sum(axis=1)
+    df["Suma_COMP"] = df[porc_cols].sum(axis=1)
 
-    df["SLOP"] = np.where(
-        df["Suma_COMP"] < 100,
-        100 - df["Suma_COMP"],
-        0
-    )
+    df["SLOP"] = np.where(df["Suma_COMP"] < 100, 100 - df["Suma_COMP"], 0)
 
     slop = df[["Fecha", "SLOP"]].copy()
     slop = slop[slop["SLOP"] > 0]
@@ -550,7 +548,7 @@ def detectar_segmentos_fallback(df_original, umbral_factor=1.02, umbral=0.0005, 
     if len(df_filtrado) < 5:
         return df_filtrado, None, [], []
     y = df_filtrado["UT measurement (mm)"].values
-    wl = min(wl_max, (len(y) - 1) if (len(y) % 2 == 0) else len(y))
+    wl = min(21, len(y) - 1)
     wl = max(wl_min, wl)
     if wl % 2 == 0:
         wl += 1
