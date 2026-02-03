@@ -42,42 +42,55 @@ def procesar_crudos(df):
 
     df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
 
-    perc_cols = [f"12.Carga.RA.PORCCOMP{i}" for i in range(1, 8)]
-    comp_cols = [f"12.Carga.RA.COMP{i}" for i in range(1, 8)]
+    detalle_list = []
 
+    for i in range(1, 8):
+
+        col_comp = f"12.Carga.RA.COMP{i}"
+        col_perc = f"12.Carga.RA.PORCCOMP{i}"
+
+        if col_comp not in df.columns or col_perc not in df.columns:
+            continue
+
+        tmp = pd.DataFrame({
+            "Fecha": df["Fecha"],
+            "COMP": f"COMP{i}",
+            "Especie": df[col_comp],
+            "Porcentaje": pd.to_numeric(df[col_perc], errors="coerce")
+        })
+
+        detalle_list.append(tmp)
+
+    detalle = pd.concat(detalle_list, ignore_index=True)
+
+    # Limpiar valores inválidos
+    detalle = detalle.dropna(subset=["Porcentaje"])
+    detalle = detalle[detalle["Especie"].notna()]
+    detalle = detalle[detalle["Especie"] != "-"]
+
+    # ===== CALCULAR SLOP =====
+    perc_cols = [f"12.Carga.RA.PORCCOMP{i}" for i in range(1, 8)]
     df[perc_cols] = df[perc_cols].apply(pd.to_numeric, errors="coerce")
 
     df["Suma_COMP"] = df[perc_cols].sum(axis=1)
 
-    df["SLOP"] = np.where(df["Suma_COMP"] < 100, 100 - df["Suma_COMP"], 0)
+    df["SLOP"] = np.where(
+        df["Suma_COMP"] < 100,
+        100 - df["Suma_COMP"],
+        0
+    )
 
-    records = []
-
-    for i in range(7):
-
-        tmp = df[["Fecha", perc_cols[i], comp_cols[i]]].copy()
-        tmp.columns = ["Fecha", "Porcentaje", "Especie"]
-
-        tmp["COMP"] = f"COMP{i+1}"
-
-        records.append(tmp)
-
-    detalle = pd.concat(records, ignore_index=True)
-
-    detalle = detalle.dropna(subset=["Porcentaje"])
-    detalle = detalle[detalle["Especie"] != "-"]
-
-    # Añadir SLOP como crudo
     slop = df[["Fecha", "SLOP"]].copy()
     slop = slop[slop["SLOP"] > 0]
 
     slop["COMP"] = "SLOP"
     slop["Especie"] = "SLOP"
-    slop.columns = ["Fecha", "Porcentaje", "COMP", "Especie"]
+    slop.rename(columns={"SLOP": "Porcentaje"}, inplace=True)
 
     detalle = pd.concat([detalle, slop], ignore_index=True)
 
     return detalle
+
 
 def asignar_crudos_a_segmentos(detalle_crudos, processed_sheets):
 
