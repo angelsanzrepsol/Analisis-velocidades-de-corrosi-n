@@ -142,6 +142,26 @@ def procesar_crudos(df):
 
     return detalle
 
+def añadir_proceso_a_dias_crudo(df_dias_crudo, df_proc):
+
+    if df_proc is None or df_proc.empty:
+        return df_dias_crudo
+
+    df_proc = df_proc.copy()
+
+    df_proc["Fecha"] = pd.to_datetime(df_proc["Fecha"])
+    df_dias_crudo["Fecha"] = pd.to_datetime(df_dias_crudo["Fecha"])
+
+    # Merge por fecha
+    df_merge = pd.merge(
+        df_dias_crudo,
+        df_proc,
+        on="Fecha",
+        how="left"
+    )
+
+    return df_merge
+
 
 
 def asignar_crudos_a_segmentos(detalle_crudos, processed_sheets):
@@ -1818,32 +1838,61 @@ with tabs[3]:
         df_crudo = df_master[df_master["Crudo"] == crudo_sel]
     
         st.write(f"Segmentos donde aparece {crudo_sel}")
+
         st.dataframe(df_crudo)
     
         # -------- Dias reales ----------
         dias_crudo = detalle_crudos[
             detalle_crudos["Especie"] == crudo_sel
         ]
-    
+        
+        # 👉 Añadir variables proceso
+        dias_crudo = añadir_proceso_a_dias_crudo(
+            dias_crudo,
+            st.session_state.get("df_proc")
+        )
+        
         st.write("Días donde aparece el crudo")
-        st.dataframe(dias_crudo[["Fecha","Porcentaje"]])
+        st.dataframe(dias_crudo)
+
     
         # =============================
-        # BLOQUE 3 — Estadística corrosión
+        # BLOQUE 3 — Relación % crudo vs corrosión
         # =============================
-    
-        st.subheader("Estadística corrosión del crudo")
-    
+        
+        st.subheader("Relación porcentaje crudo vs velocidad corrosión")
+        
         if not df_crudo.empty:
-    
+        
             vel_media = df_crudo["Velocidad_corr"].mean()
-    
+        
             st.metric("Velocidad media asociada", f"{vel_media:.4f} mm/año")
-    
-            st.write("Distribución velocidades")
-    
-            fig, ax = plt.subplots()
-            ax.hist(df_crudo["Velocidad_corr"].dropna(), bins=10)
+        
+            fig, ax = plt.subplots(figsize=(6,5))
+        
+            ax.scatter(
+                df_crudo["Porcentaje_promedio"],
+                df_crudo["Velocidad_corr"],
+                alpha=0.7
+            )
+        
+            ax.set_xlabel("% promedio del crudo en el segmento")
+            ax.set_ylabel("Velocidad corrosión (mm/año)")
+            ax.set_title(f"{crudo_sel} → % vs corrosión")
+        
+            ax.grid(True)
+        
+            # 🔥 Añadir recta tendencia
+            if len(df_crudo) > 1:
+        
+                x = df_crudo["Porcentaje_promedio"]
+                y = df_crudo["Velocidad_corr"]
+        
+                coef = np.polyfit(x, y, 1)
+                poly = np.poly1d(coef)
+        
+                ax.plot(x, poly(x))
+        
             st.pyplot(fig)
     
         # =============================
