@@ -36,6 +36,91 @@ import io
 
 import re
 
+import json
+
+def exportar_configuracion_json():
+
+    config = {
+        "parametros_globales": {
+            "umbral": st.session_state.get("umbral"),
+            "umbral_factor": st.session_state.get("umbral_factor"),
+            "min_dias_seg": st.session_state.get("min_dias_seg")
+        },
+        "sondas": []
+    }
+
+    for key, data in st.session_state.get("processed_sheets", {}).items():
+
+        sonda_data = {
+            "source_name": data["source_name"],
+            "hoja": data["hoja"],
+            "segmentos_validos": [],
+            "descartados": data.get("descartados", []),
+            "saved": data.get("saved", False),
+            "manually_modified": data.get("manually_modified", False)
+        }
+
+        for seg in data.get("segmentos_validos", []):
+
+            seg_json = seg.copy()
+
+            # Convertir fechas
+            for f in ["fecha_ini", "fecha_fin"]:
+                if isinstance(seg_json.get(f), pd.Timestamp):
+                    seg_json[f] = seg_json[f].isoformat()
+
+            # Convertir medias
+            medias = seg_json.get("medias")
+            if isinstance(medias, pd.Series):
+                seg_json["medias"] = medias.to_dict()
+
+            sonda_data["segmentos_validos"].append(seg_json)
+
+        config["sondas"].append(sonda_data)
+
+    return json.dumps(config, indent=4)
+
+def importar_configuracion_json(uploaded_json):
+
+    config = json.load(uploaded_json)
+
+    # Parámetros globales
+    params = config.get("parametros_globales", {})
+
+    st.session_state["umbral"] = params.get("umbral")
+    st.session_state["umbral_factor"] = params.get("umbral_factor")
+    st.session_state["min_dias_seg"] = params.get("min_dias_seg")
+
+    # Sondas
+    for sonda in config.get("sondas", []):
+
+        key = f"proc|{sonda['source_name']}|{sonda['hoja']}"
+
+        segmentos = []
+
+        for seg in sonda.get("segmentos_validos", []):
+
+            # Reconstruir fechas
+            for f in ["fecha_ini","fecha_fin"]:
+                if seg.get(f):
+                    seg[f] = pd.to_datetime(seg[f])
+
+            # Reconstruir medias
+            if isinstance(seg.get("medias"), dict):
+                seg["medias"] = pd.Series(seg["medias"])
+
+            segmentos.append(seg)
+
+        st.session_state["processed_sheets"][key] = {
+            "source_name": sonda["source_name"],
+            "hoja": sonda["hoja"],
+            "segmentos_validos": segmentos,
+            "descartados": sonda.get("descartados", []),
+            "saved": sonda.get("saved", True),
+            "manually_modified": sonda.get("manually_modified", True)
+        }
+
+
 def procesar_crudos(df):
 
     df = df.copy()
@@ -1538,6 +1623,26 @@ with tabs[2]:
                     df_rows.to_excel(writer, sheet_name='Segmentos', index=False)
                 buf.seek(0)
                 st.download_button("Descargar Excel (media + segmentos)", data=buf, file_name=f"media_segmentos_{data['hoja']}.xlsx")
+            st.markdown("### Exportar configuración completa")
+
+            if st.button("Descargar configuración JSON"):
+            
+                json_data = exportar_configuracion_json()
+            
+                st.download_button(
+                    "Descargar JSON configuración",
+                    json_data,
+                    file_name="configuracion_analisis.json",
+                    mime="application/json"
+                )
+            uploaded_config = st.sidebar.file_uploader(
+                "Cargar configuración JSON",
+                type=["json"]
+            )
+            
+            if uploaded_config is not None:
+                importar_configuracion_json(uploaded_config)
+                st.sidebar.success("Configuración cargada")
 
             if st.button("Borrar procesado seleccionado (sesión + archivos)"):
                 pkl_path = Path.cwd() / "procesados_finales" / f"{data['source_name']}_{data['hoja']}_procesado.pkl"
