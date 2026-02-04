@@ -135,6 +135,62 @@ def asignar_crudos_a_segmentos(detalle_crudos, processed_sheets):
 
     return pd.DataFrame()
 
+def construir_dataset_crudos_segmentos(detalle_crudos, processed_sheets):
+
+    filas = []
+
+    for key, data in processed_sheets.items():
+
+        if not data.get("saved"):
+            continue
+
+        sonda = data["source_name"]
+        hoja = data["hoja"]
+
+        for i, seg in enumerate(data["segmentos_validos"], start=1):
+
+            fi = pd.to_datetime(seg["fecha_ini"])
+            ff = pd.to_datetime(seg["fecha_fin"])
+
+            sub = detalle_crudos[
+                (detalle_crudos["Fecha"] >= fi) &
+                (detalle_crudos["Fecha"] <= ff)
+            ]
+
+            if sub.empty:
+                continue
+
+            resumen = (
+                sub.groupby("Especie")["Porcentaje"]
+                .mean()
+                .reset_index()
+            )
+
+            medias_proc = seg.get("medias", {})
+
+            for _, row in resumen.iterrows():
+
+                fila = {
+                    "Sonda": sonda,
+                    "Hoja": hoja,
+                    "Segmento": i,
+                    "Crudo": row["Especie"],
+                    "Porcentaje_promedio": row["Porcentaje"],
+                    "Velocidad_corr": seg.get("vel_abs"),
+                    "Fecha_inicio": fi,
+                    "Fecha_fin": ff
+                }
+
+                if isinstance(medias_proc, (dict, pd.Series)):
+                    for k,v in medias_proc.items():
+                        fila[k] = v
+
+                filas.append(fila)
+
+    if filas:
+        return pd.DataFrame(filas)
+
+    return pd.DataFrame()
 
 def cargar_proceso_primera_hoja_limpio(path_excel):
 
@@ -1662,45 +1718,94 @@ if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[3]:
 
-    st.header("Crudos vs Segmentos")
+    st.header("Análisis avanzado de crudos")
 
     if uploaded_crudos is None:
         st.info("Sube Excel de crudos")
-
+    
     else:
-
+    
         hojas = leer_archivo(uploaded_crudos)
-
         hoja_sel = st.selectbox("Hoja crudos", list(hojas.keys()))
-
         df_crudos = hojas[hoja_sel]
-
+    
         detalle_crudos = procesar_crudos(df_crudos)
+    
+        df_master = construir_dataset_crudos_segmentos(
+            detalle_crudos,
+            st.session_state.get("processed_sheets", {})
+        )
+    
+        if df_master.empty:
+            st.warning("No hay coincidencias con segmentos")
+            st.stop()
+    
+        # =============================
+        # BLOQUE 1 — ANALISIS SEGMENTOS
+        # =============================
+    
+        st.subheader("Crudos y variables por segmento")
+    
+        st.dataframe(df_master)
+    
+        # =============================
+        # BLOQUE 2 — BUSCADOR POR CRUDOS
+        # =============================
+    
+        st.subheader("Buscador por crudo")
+    
+        crudos_disponibles = sorted(df_master["Crudo"].dropna().unique())
+    
+        crudo_sel = st.selectbox(
+            "Selecciona crudo",
+            crudos_disponibles
+        )
+    
+        df_crudo = df_master[df_master["Crudo"] == crudo_sel]
+    
+        st.write(f"Segmentos donde aparece {crudo_sel}")
+        st.dataframe(df_crudo)
+    
+        # -------- Dias reales ----------
+        dias_crudo = detalle_crudos[
+            detalle_crudos["Especie"] == crudo_sel
+        ]
+    
+        st.write("Días donde aparece el crudo")
+        st.dataframe(dias_crudo[["Fecha","Porcentaje"]])
+    
+        # =============================
+        # BLOQUE 3 — Estadística corrosión
+        # =============================
+    
+        st.subheader("Estadística corrosión del crudo")
+    
+        if not df_crudo.empty:
+    
+            vel_media = df_crudo["Velocidad_corr"].mean()
+    
+            st.metric("Velocidad media asociada", f"{vel_media:.4f} mm/año")
+    
+            st.write("Distribución velocidades")
+    
+            fig, ax = plt.subplots()
+            ax.hist(df_crudo["Velocidad_corr"].dropna(), bins=10)
+            st.pyplot(fig)
+    
+        # =============================
+        # EXPORTAR
+        # =============================
+    
+        buffer = io.BytesIO()
+        df_master.to_excel(buffer, index=False)
+        buffer.seek(0)
+    
+        st.download_button(
+            "Descargar dataset completo",
+            buffer,
+            file_name="crudos_segmentos_proceso.xlsx"
+        )
 
-        st.subheader("Detalle diario crudos")
-        st.dataframe(detalle_crudos)
-
-        if st.session_state.get("processed_sheets"):
-
-            df_final = asignar_crudos_a_segmentos(
-                detalle_crudos,
-                st.session_state["processed_sheets"]
-            )
-
-            if not df_final.empty:
-
-                st.subheader("Promedio crudos por segmento")
-                st.dataframe(df_final)
-
-                buf = io.BytesIO()
-                df_final.to_excel(buf, index=False)
-                buf.seek(0)
-
-                st.download_button(
-                    "Descargar resultado",
-                    buf,
-                    file_name="crudos_vs_segmentos.xlsx"
-                )
 
 
 # -------------------- Footer --------------------
