@@ -78,7 +78,42 @@ def exportar_configuracion_json():
 
         config["sondas"].append(sonda_data)
 
-    return json.dumps(config, indent=4)
+    config_safe = json_safe(config)
+
+    return json.dumps(config_safe, indent=4)
+
+
+def json_safe(obj):
+
+    # pandas Timestamp
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+
+    # numpy numbers
+    if isinstance(obj, (np.integer, np.int64)):
+        return int(obj)
+
+    if isinstance(obj, (np.floating, np.float64)):
+        return float(obj)
+
+    # pandas Series
+    if isinstance(obj, pd.Series):
+        return {k: json_safe(v) for k, v in obj.to_dict().items()}
+
+    # numpy arrays
+    if isinstance(obj, np.ndarray):
+        return [json_safe(x) for x in obj.tolist()]
+
+    # dict
+    if isinstance(obj, dict):
+        return {k: json_safe(v) for k, v in obj.items()}
+
+    # list
+    if isinstance(obj, list):
+        return [json_safe(x) for x in obj]
+
+    return obj
+
 
 def importar_configuracion_json(uploaded_json):
 
