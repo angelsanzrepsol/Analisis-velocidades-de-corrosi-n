@@ -40,54 +40,82 @@ def procesar_crudos(df):
 
     df = df.copy()
 
-    # LIMPIAR NOMBRES DE COLUMNAS
+    # -----------------------------
+    # Normalizar nombres columnas
+    # -----------------------------
     df.columns = [str(c).strip() for c in df.columns]
 
-    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+    # Detectar fecha automáticamente
+    fecha_col = None
+    for c in df.columns:
+        if "fecha" in c.lower():
+            fecha_col = c
+            break
 
-    detalle_list = []
+    if fecha_col is None:
+        raise ValueError("No se encontró columna Fecha")
 
-    # Detectar dinámicamente columnas COMP y PORC
-    comp_cols = [c for c in df.columns if "COMP" in c and "PORC" not in c]
-    porc_cols = [c for c in df.columns if "PORCCOMP" in c]
+    df["Fecha"] = pd.to_datetime(df[fecha_col], errors="coerce")
+
+    # -----------------------------
+    # Detectar columnas COMP y %
+    # -----------------------------
+    comp_cols = [c for c in df.columns if "comp" in c.lower() and "porc" not in c.lower()]
+    porc_cols = [c for c in df.columns if "porccomp" in c.lower()]
 
     comp_cols = sorted(comp_cols)
     porc_cols = sorted(porc_cols)
 
-    for comp_col, porc_col in zip(comp_cols, porc_cols):
+    if not comp_cols or not porc_cols:
+        raise ValueError("No se detectaron columnas COMP / PORCCOMP")
 
-        tmp = pd.DataFrame({
-            "Fecha": df["Fecha"],
-            "COMP": comp_col,
-            "Especie": df[comp_col],
-            "Porcentaje": pd.to_numeric(df[porc_col], errors="coerce")
-        })
-
-        detalle_list.append(tmp)
-
-    detalle = pd.concat(detalle_list, ignore_index=True)
-
-    detalle = detalle.dropna(subset=["Porcentaje"])
-    detalle = detalle[detalle["Especie"].notna()]
-    detalle = detalle[detalle["Especie"] != "-"]
-
-    # ===== CALCULAR SLOP =====
+    # Convertir porcentajes
     df[porc_cols] = df[porc_cols].apply(pd.to_numeric, errors="coerce")
 
-    df["Suma_COMP"] = df[porc_cols].sum(axis=1)
+    # -----------------------------
+    # Crear SLOP si no suma 100
+    # -----------------------------
+    df["SUMA_COMP"] = df[porc_cols].sum(axis=1)
 
-    df["SLOP"] = np.where(df["Suma_COMP"] < 100, 100 - df["Suma_COMP"], 0)
+    df["SLOP"] = np.where(
+        df["SUMA_COMP"] < 100,
+        100 - df["SUMA_COMP"],
+        0
+    )
 
-    slop = df[["Fecha", "SLOP"]].copy()
-    slop = slop[slop["SLOP"] > 0]
+    # -----------------------------
+    # Crear tabla diaria
+    # -----------------------------
+    registros = []
 
-    slop["COMP"] = "SLOP"
-    slop["Especie"] = "SLOP"
-    slop.rename(columns={"SLOP": "Porcentaje"}, inplace=True)
+    for i in range(min(len(comp_cols), len(porc_cols))):
 
-    detalle = pd.concat([detalle, slop], ignore_index=True)
+        tmp = df[["Fecha", porc_cols[i], comp_cols[i]]].copy()
+        tmp.columns = ["Fecha", "Porcentaje", "Especie"]
+        tmp["COMP"] = f"COMP{i+1}"
+
+        registros.append(tmp)
+
+    detalle = pd.concat(registros, ignore_index=True)
+
+    detalle["Porcentaje"] = pd.to_numeric(detalle["Porcentaje"], errors="coerce")
+    detalle = detalle.dropna()
+
+    detalle = detalle[detalle["Especie"] != "-"]
+
+    # -----------------------------
+    # Añadir SLOP
+    # -----------------------------
+    slop_df = df[["Fecha", "SLOP"]].copy()
+    slop_df = slop_df[slop_df["SLOP"] > 0]
+    slop_df["COMP"] = "SLOP"
+    slop_df["Especie"] = "SLOP"
+    slop_df.columns = ["Fecha", "Porcentaje", "COMP", "Especie"]
+
+    detalle = pd.concat([detalle, slop_df], ignore_index=True)
 
     return detalle
+
 
 
 def asignar_crudos_a_segmentos(detalle_crudos, processed_sheets):
