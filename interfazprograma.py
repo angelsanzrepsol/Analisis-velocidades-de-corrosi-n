@@ -40,22 +40,48 @@ def procesar_crudos(df):
 
     df = df.copy()
 
-    # -----------------------------
-    # Normalizar nombres columnas
-    # -----------------------------
-    df.columns = [str(c).strip() for c in df.columns]
-
-    # Detectar fecha automáticamente
+    # ======================================================
+    # DETECTAR COLUMNA FECHA AUTOMÁTICAMENTE
+    # ======================================================
+    
     fecha_col = None
+    
+    # 1️⃣ Buscar nombres típicos
     for c in df.columns:
-        if "fecha" in c.lower():
+        cl = str(c).lower()
+        if any(k in cl for k in ["fecha", "date", "time", "timestamp", "dia"]):
             fecha_col = c
             break
-
+    
+    # 2️⃣ Buscar columnas Unnamed
     if fecha_col is None:
-        raise ValueError("No se encontró columna Fecha")
-
+        unnamed_cols = [c for c in df.columns if "unnamed" in str(c).lower()]
+    
+        for c in unnamed_cols:
+            try:
+                test = pd.to_datetime(df[c].dropna().iloc[:10], errors="coerce")
+                if test.notna().sum() >= 3:
+                    fecha_col = c
+                    break
+            except:
+                pass
+    
+    # 3️⃣ Buscar cualquier columna convertible a fecha
+    if fecha_col is None:
+        for c in df.columns:
+            try:
+                test = pd.to_datetime(df[c].dropna().iloc[:10], errors="coerce")
+                if test.notna().sum() >= 3:
+                    fecha_col = c
+                    break
+            except:
+                pass
+    
+    if fecha_col is None:
+        raise ValueError("No se pudo detectar columna de fechas")
+    
     df["Fecha"] = pd.to_datetime(df[fecha_col], errors="coerce")
+
 
     # -----------------------------
     # Detectar columnas COMP y %
