@@ -442,6 +442,120 @@ def cargar_proceso_primera_hoja_limpio(path_excel):
 
     return df, vars_proceso
 
+def dividir_segmento_por_intervalo(
+        df_filtrado,
+        segmento,
+        df_proc,
+        vars_proceso,
+        intervalo_offset,
+        min_dias=5
+):
+    nuevos_segmentos = []
+
+    fi = pd.to_datetime(segmento["fecha_ini"])
+    ff = pd.to_datetime(segmento["fecha_fin"])
+
+    fechas = pd.date_range(start=fi, end=ff, freq=intervalo_offset)
+
+    fechas = list(fechas)
+    if fechas[-1] != ff:
+        fechas.append(ff)
+
+    for i in range(len(fechas)-1):
+
+        sub_ini = fechas[i]
+        sub_fin = fechas[i+1]
+
+        sub_df = df_filtrado[
+            (df_filtrado["Sent Time"] >= sub_ini) &
+            (df_filtrado["Sent Time"] <= sub_fin)
+        ]
+
+        if len(sub_df) < 3:
+            continue
+
+        y = sub_df["UT measurement (mm)"].values
+        delta = (sub_fin - sub_ini).days
+
+        if delta < min_dias:
+            continue
+
+        velocidad = (y[-1] - y[0]) / (delta / 365.25)
+
+        # medias proceso
+        medias = {}
+        if df_proc is not None:
+            sub_proc = df_proc[
+                (df_proc["Fecha"] >= sub_ini) &
+                (df_proc["Fecha"] <= sub_fin)
+            ]
+            medias = sub_proc.mean(numeric_only=True)
+
+        nuevos_segmentos.append({
+            "ini": sub_df.index.min(),
+            "fin": sub_df.index.max(),
+            "fecha_ini": sub_ini,
+            "fecha_fin": sub_fin,
+            "delta_dias": delta,
+            "velocidad": velocidad,
+            "vel_abs": abs(velocidad),
+            "medias": medias,
+            "estado": "valido"
+        })
+
+    return nuevos_segmentos
+
+def aplicar_segmentacion_referencia(
+        df_filtrado,
+        segmentos_ref,
+        df_proc,
+        vars_proceso,
+        min_dias=5
+):
+    nuevos_segmentos = []
+
+    for ref in segmentos_ref:
+
+        fi = ref["fecha_ini"]
+        ff = ref["fecha_fin"]
+
+        sub_df = df_filtrado[
+            (df_filtrado["Sent Time"] >= fi) &
+            (df_filtrado["Sent Time"] <= ff)
+        ]
+
+        if sub_df.empty:
+            continue
+
+        y = sub_df["UT measurement (mm)"].values
+        delta = (ff - fi).days
+
+        if delta < min_dias:
+            continue
+
+        velocidad = (y[-1] - y[0]) / (delta / 365.25)
+
+        medias = {}
+        if df_proc is not None:
+            sub_proc = df_proc[
+                (df_proc["Fecha"] >= fi) &
+                (df_proc["Fecha"] <= ff)
+            ]
+            medias = sub_proc.mean(numeric_only=True)
+
+        nuevos_segmentos.append({
+            "ini": sub_df.index.min(),
+            "fin": sub_df.index.max(),
+            "fecha_ini": fi,
+            "fecha_fin": ff,
+            "delta_dias": delta,
+            "velocidad": velocidad,
+            "vel_abs": abs(velocidad),
+            "medias": medias,
+            "estado": "valido"
+        })
+
+    return nuevos_segmentos
 
 
 def make_safe_name(text: str) -> str:
@@ -1355,8 +1469,31 @@ with tabs[0]:
 
                     if seg_list:
                         sel_idx = st.selectbox("Selecciona segmento", options=list(range(1, len(seg_list)+1)), format_func=lambda x: seg_list[x-1], key=f"selseg_{key}")
+                        # ===============================
+                        # APLICAR SEGMENTACIÓN REFERENCIA
+                        # ===============================
+                        
+                        if "segmentacion_referencia" in st.session_state:
+                        
+                            if st.button("Aplicar segmentación de referencia"):
+                        
+                                ref = st.session_state["segmentacion_referencia"]
+                        
+                                nuevos = aplicar_segmentacion_referencia(
+                                    st.session_state["processed_sheets"][key]["df_filtrado"],
+                                    ref,
+                                    df_proc,
+                                    vars_proceso,
+                                    min_dias=min_dias_seg
+                                )
+                        
+                                st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos
+                                st.session_state["processed_sheets"][key]["manually_modified"] = True
+                        
+                                st.success("Segmentación de referencia aplicada.")
+                                st.rerun()
 
-                        colA, colB, colC = st.columns(3)
+                        colA, colB, colC, colD = st.columns(4)
 
                         with colA:
                             if st.button("Eliminar segmento (sesión)", key=f"del_{key}"):
@@ -1480,6 +1617,66 @@ with tabs[0]:
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"No se pudo guardar: {e}")
+                                    
+                        with colD:
+                            st.markdown("**Dividir segmento por intervalo**")
+                        
+                            tipo_intervalo = st.selectbox(
+                                "Tipo intervalo",
+                                ["Días", "Meses", "Años"],
+                                key=f"tipo_intervalo_{key}"
+                            )
+                        
+                            valor_intervalo = st.number_input(
+                                "Cantidad",
+                                min_value=1,
+                                value=15,
+                                key=f"valor_intervalo_{key}"
+                            )
+                        
+                            if st.button("Dividir segmento", key=f"dividir_{key}"):
+                        
+                                idx0 = sel_idx - 1
+                                segmentos = st.session_state["processed_sheets"][key]["segmentos_validos"]
+                        
+                                if 0 <= idx0 < len(segmentos):
+                        
+                                    seg = segmentos[idx0]
+                        
+                                    # Crear offset
+                                    if tipo_intervalo == "Días":
+                                        offset = pd.DateOffset(days=valor_intervalo)
+                                    elif tipo_intervalo == "Meses":
+                                        offset = pd.DateOffset(months=valor_intervalo)
+                                    else:
+                                        offset = pd.DateOffset(years=valor_intervalo)
+                        
+                                    nuevos_segmentos = dividir_segmento_por_intervalo(
+                                        st.session_state["processed_sheets"][key]["df_filtrado"],
+                                        seg,
+                                        df_proc,
+                                        vars_proceso,
+                                        offset,
+                                        min_dias=min_dias_seg
+                                    )
+                        
+                                    # eliminar segmento original
+                                    segmentos.pop(idx0)
+                        
+                                    # añadir nuevos
+                                    for n in nuevos_segmentos:
+                                        segmentos.append(n)
+                        
+                                    st.session_state["processed_sheets"][key]["segmentos_validos"] = sorted(
+                                        segmentos,
+                                        key=lambda x: x.get("fecha_ini")
+                                    )
+                        
+                                    st.session_state["processed_sheets"][key]["manually_modified"] = True
+                        
+                                    st.success("Segmento dividido correctamente")
+                                    st.rerun()
+
 
 # -------------------- TAB 2: Combinar hojas --------------------
 with tabs[1]:
@@ -1617,6 +1814,16 @@ with tabs[2]:
         choice = st.selectbox("Selecciona procesado guardado", options=saved_list, format_func=lambda x: f"{st.session_state['processed_sheets'][x]['source_name']} | {st.session_state['processed_sheets'][x]['hoja']}")
         data = st.session_state['processed_sheets'][choice]
         st.subheader(f"{data['source_name']} | {data['hoja']}")
+        # ===============================
+        # MARCAR COMO AJUSTE DE REFERENCIA
+        # ===============================
+        
+        if st.button("⭐ Usar este ajuste como referencia"):
+        
+            st.session_state["segmentacion_referencia"] = data["segmentos_validos"]
+        
+            st.success("Este ajuste ahora es la referencia temporal para otras sondas.")
+
         img_dir = Path.cwd() / "graficos_exportados"
         img_file = img_dir / f"{data['source_name']}_{data['hoja']}_grafica.png"
         col1, col2 = st.columns([2,1])
