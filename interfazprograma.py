@@ -1490,7 +1490,7 @@ with tabs[0]:
                     
                             if 0 <= idx0 < len(descartados):
                     
-                                seg = descartados.pop(idx0)
+                                seg = st.session_state["processed_sheets"][key]["descartados"].pop(idx0)
                     
                                 seg["estado"] = "valido"
                                 seg["vel_abs"] = abs(seg.get("velocidad", 0))
@@ -1730,19 +1730,19 @@ with tabs[0]:
                         
                                     st.success("Segmento dividido correctamente")
                                     st.rerun()
-                                    # =========================
-                                    # BOTÓN DESHACER DIVISIÓN
-                                    # =========================
-                                    if st.button("↩️ Deshacer última división", key=f"undo_div_{key}"):
-                                    
-                                        hist = st.session_state["processed_sheets"][key].get("historial_segmentos", [])
-                                    
-                                        if hist:
-                                            st.session_state["processed_sheets"][key]["segmentos_validos"] = hist.pop()
-                                            st.success("División deshecha")
-                                            st.rerun()
-                                        else:
-                                            st.warning("No hay historial para deshacer")
+                            # =========================
+                            # BOTÓN DESHACER DIVISIÓN
+                            # =========================
+                            if st.button("↩️ Deshacer última división", key=f"undo_div_{key}"):
+                            
+                                hist = st.session_state["processed_sheets"][key].get("historial_segmentos", [])
+                            
+                                if hist:
+                                    st.session_state["processed_sheets"][key]["segmentos_validos"] = hist.pop()
+                                    st.success("División deshecha")
+                                    st.rerun()
+                                else:
+                                    st.warning("No hay historial para deshacer")
 
 
 # -------------------- TAB 2: Combinar hojas --------------------
@@ -1844,67 +1844,77 @@ with tabs[1]:
 with tabs[2]:
     st.header("Revisión y guardado")
     # ======================================
-    # COMPARATIVA EXACTA USANDO REFERENCIA
+    # TABLA COMPARATIVA ENTRE SONDAS
     # ======================================
+    st.caption("Si una sonda no tiene un intervalo, aparecerá vacío.")
+    st.markdown("## Comparativa entre sondas guardadas")
     
-    st.markdown("## Comparativa exacta entre sondas (usando referencia)")
+    processed = {
+        k: v for k, v in st.session_state.get("processed_sheets", {}).items()
+        if v.get("saved")
+    }
     
-    if "segmentacion_referencia" not in st.session_state:
-        st.info("Marca primero una sonda como referencia ⭐")
+    if len(processed) == 0:
+    
+        st.info("No hay sondas guardadas aún.")
+    
     else:
     
-        ref_segmentos = st.session_state["segmentacion_referencia"]
-        processed = st.session_state.get("processed_sheets", {})
+        # -----------------------------
+        # Elegir base de segmentación
+        # -----------------------------
     
-        resultados = []
+        if "segmentacion_referencia" in st.session_state:
+            segmentos_base = st.session_state["segmentacion_referencia"]
+        else:
+            # usar primera sonda guardada
+            primera = list(processed.values())[0]
+            segmentos_base = primera["segmentos_validos"]
     
-        for key, data in processed.items():
+        filas = []
     
-            if not data.get("saved"):
-                continue
+        for i, seg_base in enumerate(segmentos_base, start=1):
     
-            df_filtrado = data["df_filtrado"]
+            fila = {"Segmento": f"Seg {i}"}
     
-            # 🔥 recalcular segmentos con referencia
-            nuevos_segmentos = aplicar_segmentacion_referencia(
-                df_filtrado,
-                ref_segmentos,
-                st.session_state.get("df_proc"),
-                st.session_state.get("vars_proceso"),
-                min_dias=st.session_state.get("min_dias_seg", 5)
-            )
+            fi_ref = pd.to_datetime(seg_base["fecha_ini"])
+            ff_ref = pd.to_datetime(seg_base["fecha_fin"])
     
-            nombre_sonda = f"{data['source_name']} | {data['hoja']}"
+            # recorrer sondas
+            for key, data in processed.items():
     
-            for i, seg in enumerate(nuevos_segmentos, start=1):
+                nombre_sonda = f"{data['source_name']} | {data['hoja']}"
     
-                resultados.append({
-                    "Segmento": f"Seg {i}",
-                    "Sonda": nombre_sonda,
-                    "Velocidad": seg.get("vel_abs")
-                })
+                vel = None
     
-        if resultados:
+                for seg in data["segmentos_validos"]:
     
-            df_temp = pd.DataFrame(resultados)
+                    fi = pd.to_datetime(seg["fecha_ini"])
+                    ff = pd.to_datetime(seg["fecha_fin"])
     
-            df_pivot = df_temp.pivot(
-                index="Segmento",
-                columns="Sonda",
-                values="Velocidad"
-            )
+                    # ✔ coincidencia exacta
+                    if fi == fi_ref and ff == ff_ref:
+                        vel = seg.get("vel_abs")
+                        break
     
-            st.dataframe(df_pivot)
+                fila[nombre_sonda] = vel
     
-            buffer = io.BytesIO()
-            df_pivot.to_excel(buffer)
-            buffer.seek(0)
+            filas.append(fila)
     
-            st.download_button(
-                "Descargar comparativa exacta",
-                buffer,
-                file_name="comparativa_sondas_exacta.xlsx"
-            )
+        df_comp = pd.DataFrame(filas)
+    
+        st.dataframe(df_comp)
+    
+        # Exportar
+        buffer = io.BytesIO()
+        df_comp.to_excel(buffer, index=False)
+        buffer.seek(0)
+    
+        st.download_button(
+            "Descargar comparativa",
+            buffer,
+            file_name="comparativa_sondas.xlsx"
+        )
 
     if "processed_sheets" in st.session_state and st.session_state["processed_sheets"]:
         opciones = list(st.session_state["processed_sheets"].keys())
