@@ -1461,6 +1461,52 @@ with tabs[0]:
                         st.error(f"Error dibujando gráfica: {e}")
 
                     st.markdown("### Editar segmentos (eliminar / recalcular)")
+                    # ===============================
+                    # RECUPERAR SEGMENTOS DESCARTADOS
+                    # ===============================
+                    
+                    desc_list = []
+                    descartados = st.session_state["processed_sheets"][key]["descartados"]
+                    
+                    if descartados:
+                    
+                        st.markdown("### Recuperar segmentos descartados")
+                    
+                        desc_list = [
+                            f"{i+1}: {d.get('fecha_ini')} → {d.get('fecha_fin')} | Motivo: {d.get('motivo')}"
+                            for i,d in enumerate(descartados)
+                        ]
+                    
+                        sel_desc = st.selectbox(
+                            "Selecciona segmento descartado",
+                            options=list(range(1, len(desc_list)+1)),
+                            format_func=lambda x: desc_list[x-1],
+                            key=f"sel_desc_{key}"
+                        )
+                    
+                        if st.button("Recuperar segmento descartado", key=f"recuperar_{key}"):
+                    
+                            idx0 = sel_desc - 1
+                    
+                            if 0 <= idx0 < len(descartados):
+                    
+                                seg = descartados.pop(idx0)
+                    
+                                seg["estado"] = "valido"
+                                seg["vel_abs"] = abs(seg.get("velocidad", 0))
+                    
+                                st.session_state["processed_sheets"][key]["segmentos_validos"].append(seg)
+                    
+                                st.session_state["processed_sheets"][key]["segmentos_validos"] = sorted(
+                                    st.session_state["processed_sheets"][key]["segmentos_validos"],
+                                    key=lambda x: x.get("fecha_ini")
+                                )
+                    
+                                st.session_state["processed_sheets"][key]["manually_modified"] = True
+                    
+                                st.success("Segmento recuperado")
+                                st.rerun()
+
                     seg_list = []
                     try:
                         seg_list = [f"{i+1}: {s.get('fecha_ini')} → {s.get('fecha_fin')}  | Vel: {s.get('vel_abs')}" for i,s in enumerate(st.session_state["processed_sheets"][key]["segmentos_validos"])]
@@ -1659,7 +1705,15 @@ with tabs[0]:
                                         offset,
                                         min_dias=min_dias_seg
                                     )
-                        
+                            
+                                    # Guardar backup para poder deshacer
+                                    if "historial_segmentos" not in st.session_state["processed_sheets"][key]:
+                                        st.session_state["processed_sheets"][key]["historial_segmentos"] = []
+                                    
+                                    st.session_state["processed_sheets"][key]["historial_segmentos"].append(
+                                        st.session_state["processed_sheets"][key]["segmentos_validos"].copy()
+                                    )
+
                                     # eliminar segmento original
                                     segmentos.pop(idx0)
                         
@@ -1676,6 +1730,19 @@ with tabs[0]:
                         
                                     st.success("Segmento dividido correctamente")
                                     st.rerun()
+                                    # =========================
+                                    # BOTÓN DESHACER DIVISIÓN
+                                    # =========================
+                                    if st.button("↩️ Deshacer última división", key=f"undo_div_{key}"):
+                                    
+                                        hist = st.session_state["processed_sheets"][key].get("historial_segmentos", [])
+                                    
+                                        if hist:
+                                            st.session_state["processed_sheets"][key]["segmentos_validos"] = hist.pop()
+                                            st.success("División deshecha")
+                                            st.rerun()
+                                        else:
+                                            st.warning("No hay historial para deshacer")
 
 
 # -------------------- TAB 2: Combinar hojas --------------------
@@ -1776,6 +1843,69 @@ with tabs[1]:
 # -------------------- TAB 3: Revisión / Guardado --------------------
 with tabs[2]:
     st.header("Revisión y guardado")
+    # ======================================
+    # COMPARATIVA EXACTA USANDO REFERENCIA
+    # ======================================
+    
+    st.markdown("## Comparativa exacta entre sondas (usando referencia)")
+    
+    if "segmentacion_referencia" not in st.session_state:
+        st.info("Marca primero una sonda como referencia ⭐")
+    else:
+    
+        ref_segmentos = st.session_state["segmentacion_referencia"]
+        processed = st.session_state.get("processed_sheets", {})
+    
+        resultados = []
+    
+        for key, data in processed.items():
+    
+            if not data.get("saved"):
+                continue
+    
+            df_filtrado = data["df_filtrado"]
+    
+            # 🔥 recalcular segmentos con referencia
+            nuevos_segmentos = aplicar_segmentacion_referencia(
+                df_filtrado,
+                ref_segmentos,
+                st.session_state.get("df_proc"),
+                st.session_state.get("vars_proceso"),
+                min_dias=st.session_state.get("min_dias_seg", 5)
+            )
+    
+            nombre_sonda = f"{data['source_name']} | {data['hoja']}"
+    
+            for i, seg in enumerate(nuevos_segmentos, start=1):
+    
+                resultados.append({
+                    "Segmento": f"Seg {i}",
+                    "Sonda": nombre_sonda,
+                    "Velocidad": seg.get("vel_abs")
+                })
+    
+        if resultados:
+    
+            df_temp = pd.DataFrame(resultados)
+    
+            df_pivot = df_temp.pivot(
+                index="Segmento",
+                columns="Sonda",
+                values="Velocidad"
+            )
+    
+            st.dataframe(df_pivot)
+    
+            buffer = io.BytesIO()
+            df_pivot.to_excel(buffer)
+            buffer.seek(0)
+    
+            st.download_button(
+                "Descargar comparativa exacta",
+                buffer,
+                file_name="comparativa_sondas_exacta.xlsx"
+            )
+
     if "processed_sheets" in st.session_state and st.session_state["processed_sheets"]:
         opciones = list(st.session_state["processed_sheets"].keys())
         sel_key = st.selectbox("Selecciona hoja procesada", options=opciones)
@@ -1823,6 +1953,35 @@ with tabs[2]:
             st.session_state["segmentacion_referencia"] = data["segmentos_validos"]
         
             st.success("Este ajuste ahora es la referencia temporal para otras sondas.")
+        # =====================================
+        # APLICAR REFERENCIA A TODAS LAS SONDAS
+        # =====================================
+        
+        if "segmentacion_referencia" in st.session_state:
+        
+            if st.button("Aplicar segmentación referencia a TODAS las sondas"):
+        
+                ref = st.session_state["segmentacion_referencia"]
+        
+                for key, data in st.session_state["processed_sheets"].items():
+        
+                    df_filtrado = data["df_filtrado"]
+        
+                    nuevos_segmentos = aplicar_segmentacion_referencia(
+                        df_filtrado,
+                        ref,
+                        st.session_state.get("df_proc"),
+                        st.session_state.get("vars_proceso"),
+                        min_dias=st.session_state.get("min_dias_seg", 5)
+                    )
+        
+                    if nuevos_segmentos:
+        
+                        st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos_segmentos
+                        st.session_state["processed_sheets"][key]["manually_modified"] = True
+        
+                st.success("Referencia aplicada a todas las sondas")
+                st.rerun()
 
         img_dir = Path.cwd() / "graficos_exportados"
         img_file = img_dir / f"{data['source_name']}_{data['hoja']}_grafica.png"
@@ -1900,7 +2059,7 @@ with tabs[2]:
                 st.session_state['processed_sheets'].pop(choice, None)
                 st.success(f"Procesado eliminado. Archivos borrados: {len(removed)} (si existían).")
                 st.rerun()
-
+                
             if safe_get("guardar_resultados") is not None and st.button("Ejecutar guardar_resultados del script original"):
                 try:
                     guardar_fn = safe_get("guardar_resultados")
