@@ -1098,6 +1098,23 @@ def buscar_velocidad_mpa(df_mpa, temp, tan, material):
     else:
         return fila.get(col_5cr)
 
+def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
+
+    if df_mpa is None or pd.isna(temp) or pd.isna(tan):
+        return None
+
+    df_tmp = df_mpa.copy()
+
+    df_tmp["dist"] = (
+        (df_tmp["Temperature"] - temp)**2 +
+        (df_tmp["Acid Measurement"] - tan)**2
+    )
+
+    fila = df_tmp.loc[df_tmp["dist"].idxmin()]
+
+    return fila.get(material)
+
+
 def dibujar_grafica_completa_fallback(df_filtrado, y_suave, segmentos_validos, descartados, segmentos_eliminados_idx, titulo="Velocidad de corrosión", figsize=(14,10), show=False):
     fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
     fig.patch.set_facecolor("white"); ax.set_facecolor("white"); ax.grid(True, alpha=0.35)
@@ -1919,6 +1936,11 @@ with tabs[2]:
     # ======================================
     st.caption("Si una sonda no tiene un intervalo, aparecerá vacío.")
     st.markdown("## Comparativa entre sondas guardadas")
+    material_sel = st.radio(
+        "Material velocidad esperada",
+        ["Carbon Steel", "5 Cr"],
+        horizontal=True
+    )
     df_mpa = st.session_state.get("df_mpa")
     processed = {
         k: v for k, v in st.session_state.get("processed_sheets", {}).items()
@@ -1943,10 +1965,60 @@ with tabs[2]:
             segmentos_base = primera["segmentos_validos"]
     
         filas = []
-    
+
         for i, seg_base in enumerate(segmentos_base, start=1):
-    
+        
             fila = {"Segmento": f"Seg {i}"}
+        
+            # -------- VELOCIDAD ESPERADA --------
+        
+            vel_esperada = None
+            df_mpa = st.session_state.get("df_mpa")
+        
+            if df_mpa is not None:
+        
+                medias = seg_base.get("medias", {})
+        
+                temp = None
+                tan = None
+        
+                if isinstance(medias, (dict, pd.Series)):
+                    temp = medias.get("Temperatura")
+                    tan = medias.get("TAN")
+        
+                vel_esperada = buscar_velocidad_mas_cercana(
+                    df_mpa,
+                    temp,
+                    tan,
+                    material_sel
+                )
+        
+            fila["Velocidad esperada"] = vel_esperada
+        
+            # -------- VELOCIDADES SONDAS --------
+        
+            fi_ref = pd.to_datetime(seg_base["fecha_ini"])
+            ff_ref = pd.to_datetime(seg_base["fecha_fin"])
+        
+            for key, data in processed.items():
+        
+                nombre_sonda = f"{data['source_name']} | {data['hoja']}"
+        
+                vel = None
+        
+                for seg in data["segmentos_validos"]:
+        
+                    fi = pd.to_datetime(seg["fecha_ini"])
+                    ff = pd.to_datetime(seg["fecha_fin"])
+        
+                    if fi == fi_ref and ff == ff_ref:
+                        vel = seg.get("vel_abs")
+                        break
+        
+                fila[nombre_sonda] = vel
+        
+            filas.append(fila)
+
     
             fi_ref = pd.to_datetime(seg_base["fecha_ini"])
             ff_ref = pd.to_datetime(seg_base["fecha_fin"])
