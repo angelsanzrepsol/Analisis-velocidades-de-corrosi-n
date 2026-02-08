@@ -763,18 +763,27 @@ uploaded_mpa = st.sidebar.file_uploader(
 if uploaded_mpa is not None:
 
     try:
-        if uploaded_mpa.name.endswith(".xls"):
+
+        if uploaded_mpa.name.lower().endswith(".xls"):
             df_mpa = pd.read_excel(uploaded_mpa, engine="xlrd")
-        else:
+
+        elif uploaded_mpa.name.lower().endswith(".xlsx"):
             df_mpa = pd.read_excel(uploaded_mpa, engine="openpyxl")
 
-        df_mpa.columns = [str(c).strip() for c in df_mpa.columns]
+        else:
+            st.sidebar.error("Formato MPA no soportado")
+            df_mpa = None
 
-        st.session_state["df_mpa"] = df_mpa
-        st.sidebar.success("Curvas MPA cargadas")
+        if df_mpa is not None:
+
+            df_mpa.columns = [str(c).strip() for c in df_mpa.columns]
+
+            st.session_state["df_mpa"] = df_mpa
+            st.sidebar.success("Curvas MPA cargadas")
 
     except Exception as e:
         st.sidebar.error(f"Error leyendo MPA: {e}")
+
 
 st.sidebar.markdown("---")
 
