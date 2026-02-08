@@ -763,11 +763,14 @@ uploaded_mpa = st.sidebar.file_uploader(
 if uploaded_mpa is not None:
 
     try:
-        df_mpa = pd.read_excel(uploaded_mpa)
+        if uploaded_mpa.name.endswith(".xls"):
+            df_mpa = pd.read_excel(uploaded_mpa, engine="xlrd")
+        else:
+            df_mpa = pd.read_excel(uploaded_mpa, engine="openpyxl")
+
         df_mpa.columns = [str(c).strip() for c in df_mpa.columns]
 
         st.session_state["df_mpa"] = df_mpa
-
         st.sidebar.success("Curvas MPA cargadas")
 
     except Exception as e:
