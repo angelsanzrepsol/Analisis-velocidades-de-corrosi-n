@@ -764,20 +764,34 @@ if uploaded_mpa is not None:
 
     try:
 
-        if uploaded_mpa.name.lower().endswith(".xls"):
-            df_mpa = pd.read_excel(uploaded_mpa, engine="xlrd")
+        df_mpa = None
 
-        elif uploaded_mpa.name.lower().endswith(".xlsx"):
+        # Intento 1 → openpyxl
+        try:
             df_mpa = pd.read_excel(uploaded_mpa, engine="openpyxl")
+        except:
+            pass
 
+        # Intento 2 → xlrd
+        if df_mpa is None:
+            try:
+                uploaded_mpa.seek(0)
+                df_mpa = pd.read_excel(uploaded_mpa, engine="xlrd")
+            except:
+                pass
+
+        # Intento 3 → lectura automática pandas
+        if df_mpa is None:
+            try:
+                uploaded_mpa.seek(0)
+                df_mpa = pd.read_excel(uploaded_mpa)
+            except:
+                pass
+
+        if df_mpa is None:
+            st.sidebar.error("No se pudo leer el archivo MPA. Revisa formato Excel.")
         else:
-            st.sidebar.error("Formato MPA no soportado")
-            df_mpa = None
-
-        if df_mpa is not None:
-
             df_mpa.columns = [str(c).strip() for c in df_mpa.columns]
-
             st.session_state["df_mpa"] = df_mpa
             st.sidebar.success("Curvas MPA cargadas")
 
