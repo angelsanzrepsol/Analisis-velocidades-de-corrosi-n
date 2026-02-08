@@ -760,6 +760,18 @@ uploaded_mpa = st.sidebar.file_uploader(
     type=["xlsx"],
     key="file_uploader_mpa"
 )
+if uploaded_mpa is not None:
+
+    try:
+        df_mpa = pd.read_excel(uploaded_mpa)
+        df_mpa.columns = [str(c).strip() for c in df_mpa.columns]
+
+        st.session_state["df_mpa"] = df_mpa
+
+        st.sidebar.success("Curvas MPA cargadas")
+
+    except Exception as e:
+        st.sidebar.error(f"Error leyendo MPA: {e}")
 
 st.sidebar.markdown("---")
 
@@ -850,20 +862,6 @@ def cached_read_excel_sheet_df(uploaded_file, sheet_name):
     except Exception:
         return pd.DataFrame()
 
-df_mpa = None
-
-if uploaded_mpa is not None:
-
-    try:
-        df_mpa = pd.read_excel(uploaded_mpa)
-        df_mpa.columns = [str(c).strip() for c in df_mpa.columns]
-
-        st.session_state["df_mpa"] = df_mpa
-
-        st.sidebar.success("Curvas MPA cargadas")
-
-    except Exception as e:
-        st.sidebar.error(f"Error leyendo MPA: {e}")
 
 # -------------------- Funciones fallback --------------------
 def detect_columns_fallback(df):
