@@ -755,6 +755,11 @@ uploaded_crudos = st.sidebar.file_uploader(
     type=None,
     key="file_uploader_crudos"
 )
+uploaded_mpa = st.sidebar.file_uploader(
+    "Archivo curvas corrosión MPA (.xlsx)",
+    type=["xlsx"],
+    key="file_uploader_mpa"
+)
 
 st.sidebar.markdown("---")
 
@@ -845,6 +850,20 @@ def cached_read_excel_sheet_df(uploaded_file, sheet_name):
     except Exception:
         return pd.DataFrame()
 
+df_mpa = None
+
+if uploaded_mpa is not None:
+
+    try:
+        df_mpa = pd.read_excel(uploaded_mpa)
+        df_mpa.columns = [str(c).strip() for c in df_mpa.columns]
+
+        st.session_state["df_mpa"] = df_mpa
+
+        st.sidebar.success("Curvas MPA cargadas")
+
+    except Exception as e:
+        st.sidebar.error(f"Error leyendo MPA: {e}")
 
 # -------------------- Funciones fallback --------------------
 def detect_columns_fallback(df):
@@ -1032,6 +1051,28 @@ def extraer_segmentos_validos_fallback(df_filtrado, y_suave, segmentos_raw, df_p
         })
 
     return segmentos_validos, descartados
+
+def buscar_velocidad_mpa(df_mpa, temp, tan, material):
+
+    if df_mpa is None or pd.isna(temp) or pd.isna(tan):
+        return None
+
+    col_temp = "Temperature"
+    col_tan = "Acid measurement"
+    col_cs = "Carbon Steel"
+    col_5cr = "5 Cr"
+
+    df_mpa["dist"] = (
+        (df_mpa[col_temp] - temp)**2 +
+        (df_mpa[col_tan] - tan)**2
+    )
+
+    fila = df_mpa.loc[df_mpa["dist"].idxmin()]
+
+    if material == "Carbon Steel":
+        return fila.get(col_cs)
+    else:
+        return fila.get(col_5cr)
 
 def dibujar_grafica_completa_fallback(df_filtrado, y_suave, segmentos_validos, descartados, segmentos_eliminados_idx, titulo="Velocidad de corrosión", figsize=(14,10), show=False):
     fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
@@ -1843,12 +1884,18 @@ with tabs[1]:
 # -------------------- TAB 3: Revisión / Guardado --------------------
 with tabs[2]:
     st.header("Revisión y guardado")
+    material_sel = st.radio(
+        "Material",
+        ["Carbon Steel", "5 Cr"],
+        horizontal=True
+    )
+
     # ======================================
     # TABLA COMPARATIVA ENTRE SONDAS
     # ======================================
     st.caption("Si una sonda no tiene un intervalo, aparecerá vacío.")
     st.markdown("## Comparativa entre sondas guardadas")
-    
+    df_mpa = st.session_state.get("df_mpa")
     processed = {
         k: v for k, v in st.session_state.get("processed_sheets", {}).items()
         if v.get("saved")
