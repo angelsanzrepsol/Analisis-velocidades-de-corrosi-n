@@ -1981,11 +1981,17 @@ with tabs[2]:
         
                 temp = None
                 tan = None
-        
+                
                 if isinstance(medias, (dict, pd.Series)):
-                    temp = medias.get("Temperatura")
-                    tan = medias.get("TAN")
-        
+                
+                    for k,v in medias.items():
+                
+                        if "temp" in k.lower():
+                            temp = v
+                
+                        if "tan" in k.lower():
+                            tan = v
+
                 vel_esperada = buscar_velocidad_mas_cercana(
                     df_mpa,
                     temp,
