@@ -760,44 +760,49 @@ uploaded_mpa = st.sidebar.file_uploader(
     type=["xlsx"],
     key="file_uploader_mpa"
 )
+
+def cargar_y_limpiar_mpa(uploaded_file):
+
+    df = pd.read_excel(uploaded_file)
+
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # eliminar fila unidades
+    df = df.iloc[1:].reset_index(drop=True)
+
+    # corregir nombre 5 Cr
+    if "5 Cr " in df.columns:
+        df.rename(columns={"5 Cr ": "5 Cr"}, inplace=True)
+
+    df["Temperature"] = pd.to_numeric(df["Temperature"], errors="coerce")
+    df["Acid Measurement"] = pd.to_numeric(df["Acid Measurement"], errors="coerce")
+
+    for col in ["Carbon Steel", "5 Cr"]:
+
+        df[col] = (
+            df[col]
+            .astype(str)
+            .str.replace(",", ".")
+            .str.replace("<", "")
+            .str.strip()
+        )
+
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df = df.dropna(subset=["Temperature", "Acid Measurement"])
+
+    return df
+
 if uploaded_mpa is not None:
 
     try:
+        df_mpa = cargar_y_limpiar_mpa(uploaded_mpa)
 
-        df_mpa = None
-
-        # Intento 1 → openpyxl
-        try:
-            df_mpa = pd.read_excel(uploaded_mpa, engine="openpyxl")
-        except:
-            pass
-
-        # Intento 2 → xlrd
-        if df_mpa is None:
-            try:
-                uploaded_mpa.seek(0)
-                df_mpa = pd.read_excel(uploaded_mpa, engine="xlrd")
-            except:
-                pass
-
-        # Intento 3 → lectura automática pandas
-        if df_mpa is None:
-            try:
-                uploaded_mpa.seek(0)
-                df_mpa = pd.read_excel(uploaded_mpa)
-            except:
-                pass
-
-        if df_mpa is None:
-            st.sidebar.error("No se pudo leer el archivo MPA. Revisa formato Excel.")
-        else:
-            df_mpa.columns = [str(c).strip() for c in df_mpa.columns]
-            st.session_state["df_mpa"] = df_mpa
-            st.sidebar.success("Curvas MPA cargadas")
+        st.session_state["df_mpa"] = df_mpa
+        st.sidebar.success("Curvas MPA cargadas")
 
     except Exception as e:
         st.sidebar.error(f"Error leyendo MPA: {e}")
-
 
 st.sidebar.markdown("---")
 
@@ -1082,7 +1087,7 @@ def buscar_velocidad_mpa(df_mpa, temp, tan, material):
         return None
 
     col_temp = "Temperature"
-    col_tan = "Acid measurement"
+    col_tan = "Acid Measurement"
     col_cs = "Carbon Steel"
     col_5cr = "5 Cr"
 
@@ -2002,29 +2007,6 @@ with tabs[2]:
             fila["Velocidad esperada"] = vel_esperada
         
             # -------- VELOCIDADES SONDAS --------
-        
-            fi_ref = pd.to_datetime(seg_base["fecha_ini"])
-            ff_ref = pd.to_datetime(seg_base["fecha_fin"])
-        
-            for key, data in processed.items():
-        
-                nombre_sonda = f"{data['source_name']} | {data['hoja']}"
-        
-                vel = None
-        
-                for seg in data["segmentos_validos"]:
-        
-                    fi = pd.to_datetime(seg["fecha_ini"])
-                    ff = pd.to_datetime(seg["fecha_fin"])
-        
-                    if fi == fi_ref and ff == ff_ref:
-                        vel = seg.get("vel_abs")
-                        break
-        
-                fila[nombre_sonda] = vel
-        
-            filas.append(fila)
-
     
             fi_ref = pd.to_datetime(seg_base["fecha_ini"])
             ff_ref = pd.to_datetime(seg_base["fecha_fin"])
