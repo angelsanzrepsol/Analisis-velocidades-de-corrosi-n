@@ -1988,14 +1988,18 @@ with tabs[2]:
                 tan = None
                 
                 if isinstance(medias, (dict, pd.Series)):
-                
+
                     for k,v in medias.items():
                 
-                        if "temp" in k.lower():
+                        kl = k.lower()
+                
+                        if "temp" in kl:
                             temp = v
                 
-                        if "tan" in k.lower():
+                        # 🔥 detectar TAN correctamente
+                        if "tan" in kl or "acid" in kl:
                             tan = v
+
 
                 vel_esperada = buscar_velocidad_mas_cercana(
                     df_mpa,
