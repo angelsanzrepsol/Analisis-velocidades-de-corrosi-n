@@ -1943,11 +1943,6 @@ with tabs[1]:
 # -------------------- TAB 3: Revisión / Guardado --------------------
 with tabs[2]:
     st.header("Revisión y guardado")
-    material_sel = st.radio(
-        "Material",
-        ["Carbon Steel", "5 Cr"],
-        horizontal=True
-    )
 
     # ======================================
     # TABLA COMPARATIVA ENTRE SONDAS
@@ -2051,7 +2046,31 @@ with tabs[2]:
             filas.append(fila)
     
         df_comp = pd.DataFrame(filas)
-    
+        
+        # =========================
+        # ESTADÍSTICAS ENTRE SONDAS
+        # =========================
+        
+        cols_sondas = [
+            c for c in df_comp.columns
+            if c not in ["Segmento", "Velocidad esperada"]
+        ]
+        
+        df_comp["Media velocidades"] = df_comp[cols_sondas].mean(axis=1)
+        df_comp["Desv Std velocidades"] = df_comp[cols_sondas].std(axis=1)
+        
+        df_comp["Coef Variación (%)"] = (
+            df_comp["Desv Std velocidades"] /
+            df_comp["Media velocidades"]
+        ) * 100
+        
+        df_comp["Dif Real vs Esperada"] = (
+            df_comp["Media velocidades"] -
+            df_comp["Velocidad esperada"]
+        )
+        
+        df_comp["Dif absoluta"] = df_comp["Dif Real vs Esperada"].abs()
+
         st.dataframe(df_comp)
     
         # Exportar
@@ -2158,8 +2177,19 @@ with tabs[2]:
             st.markdown("### Resumen y acciones")
             st.write(f"Segmentos válidos: {len(data['segmentos_validos'])} — Descartados: {len(data['descartados'])}")
             try:
-                mean_ut = float(np.nanmean(data['df_filtrado']['UT measurement (mm)']))
-                st.metric(label="Media UT (mm)", value=f"{mean_ut:.4f}")
+                try:
+                    ut_vals = data['df_filtrado']['UT measurement (mm)']
+                
+                    perdida_grosor = ut_vals.iloc[0] - ut_vals.iloc[-1]
+                
+                    st.metric(
+                        label="Pérdida total de grosor (mm)",
+                        value=f"{perdida_grosor:.4f}"
+                    )
+                
+                except Exception:
+                    st.write("No se pudo calcular pérdida de grosor")
+
             except Exception:
                 st.write("No se pudo calcular la media UT (datos faltantes).")
 
