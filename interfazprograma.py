@@ -1988,17 +1988,32 @@ with tabs[2]:
                 tan = None
                 
                 if isinstance(medias, (dict, pd.Series)):
+                
+                    # ---- TEMPERATURA ----
+                    temp_cands = [
+                        v for k, v in medias.items()
+                        if "temp" in str(k).lower() and pd.notna(v)
+                    ]
+                
+                    if temp_cands:
+                        try:
+                            temp = float(temp_cands[0])
+                        except:
+                            temp = None
+                
+                    # ---- TAN / ACID MEASUREMENT ----
+                    tan_cands = [
+                        v for k, v in medias.items()
+                        if any(x in str(k).lower() for x in ["tan", "acid"])
+                        and pd.notna(v)
+                    ]
+                
+                    if tan_cands:
+                        try:
+                            tan = float(tan_cands[0])
+                        except:
+                            tan = None
 
-                    for k,v in medias.items():
-                
-                        kl = k.lower()
-                
-                        if "temp" in kl:
-                            temp = v
-                
-                        # 🔥 detectar TAN correctamente
-                        if "tan" in kl or "acid" in kl:
-                            tan = v
 
 
                 vel_esperada = buscar_velocidad_mas_cercana(
