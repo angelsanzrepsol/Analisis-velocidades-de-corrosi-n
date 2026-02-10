@@ -1996,8 +1996,6 @@ with tabs[2]:
             if df_mpa is not None:
         
                 medias = seg_base.get("medias", {})
-                
-                st.write("MEDIAS SEGMENTO:", medias)
 
         
                 temp = None
@@ -2007,22 +2005,15 @@ with tabs[2]:
                 
                     medias_dict = dict(medias)
                 
-                    # Buscar temperatura
-                    for k,v in medias_dict.items():
-                        if "temp" in str(k).lower():
-                            if pd.notna(v):
-                                temp = float(v)
-                                break
+                    # ✔ TU EXCEL REAL USA ESTOS NOMBRES
+                    temp = next((v for k,v in medias_dict.items() if k.upper() == "T"), None)
+                    tan = next((v for k,v in medias_dict.items() if k.upper() == "TAN"), None)
+
+                    if pd.notna(temp):
+                        temp = float(temp)
                 
-                    # Buscar TAN / Acid
-                    for k,v in medias_dict.items():
-                        if any(x in str(k).lower() for x in ["tan","acid"]):
-                            if pd.notna(v):
-                                tan = float(v)
-                                break
-
-
-
+                    if pd.notna(tan):
+                        tan = float(tan)
 
                 vel_esperada = buscar_velocidad_mas_cercana(
                     df_mpa,
