@@ -407,13 +407,22 @@ def cargar_proceso_primera_hoja_limpio(path_excel):
 
 
     # Buscar la primera fila que contenga al menos un número (datos reales)
+    # Buscar fila donde aparezca columna tipo Fecha / Time / Timestamp
     fila_inicio = None
+    
     for i in range(len(df_raw)):
-        fila = df_raw.iloc[i]
-        # Si alguna celda es numérica → esta fila es inicio
-        if fila.apply(lambda x: isinstance(x, (int,float)) or str(x).replace('.', '', 1).isdigit()).any():
+        fila = df_raw.iloc[i].astype(str).str.lower()
+    
+        if any(
+            any(k in celda for k in ["fecha", "time", "timestamp", "date"])
+            for celda in fila
+        ):
             fila_inicio = i
             break
+    
+    if fila_inicio is None:
+        fila_inicio = 0
+
 
     if fila_inicio is None:
         raise ValueError("No se encontraron filas con datos numéricos en el archivo de proceso.")
@@ -428,11 +437,22 @@ def cargar_proceso_primera_hoja_limpio(path_excel):
     # Crear columna fecha artificial si no existe
     if "Fecha" not in df.columns:
         df["Fecha"] = pd.date_range(start="2000-01-01", periods=len(df), freq="D")
+        df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+        df = df.dropna(subset=["Fecha"])
+
 
     # Convertir todo lo posible a numérico
     for c in df.columns:
         if c != "Fecha":
             df[c] = pd.to_numeric(df[c], errors="coerce")
+            df[c] = (
+                df[c]
+                .astype(str)
+                .str.replace(",", ".")
+            )
+            
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
 
     # Quitar columnas completamente vacías
     df = df.dropna(axis=1, how="all")
@@ -1621,6 +1641,10 @@ with tabs[0]:
                             stored["segmentos_validos"], stored["descartados"], [],
                             titulo=f"Segmentación — {hoja_sel}", figsize=(fig_w, fig_h), show=False
                         )
+                        # Quitar leyenda solo en esta pestaña
+                        if ax.get_legend() is not None:
+                            ax.get_legend().remove()
+
                         st.pyplot(fig)
                     except Exception as e:
                         st.error(f"Error dibujando gráfica: {e}")
