@@ -1983,36 +1983,31 @@ with tabs[2]:
             if df_mpa is not None:
         
                 medias = seg_base.get("medias", {})
+                
+                st.write("MEDIAS SEGMENTO:", medias)
+
         
                 temp = None
                 tan = None
                 
                 if isinstance(medias, (dict, pd.Series)):
                 
-                    # ---- TEMPERATURA ----
-                    temp_cands = [
-                        v for k, v in medias.items()
-                        if "temp" in str(k).lower() and pd.notna(v)
-                    ]
+                    medias_dict = dict(medias)
                 
-                    if temp_cands:
-                        try:
-                            temp = float(temp_cands[0])
-                        except:
-                            temp = None
+                    # Buscar temperatura
+                    for k,v in medias_dict.items():
+                        if "temp" in str(k).lower():
+                            if pd.notna(v):
+                                temp = float(v)
+                                break
                 
-                    # ---- TAN / ACID MEASUREMENT ----
-                    tan_cands = [
-                        v for k, v in medias.items()
-                        if any(x in str(k).lower() for x in ["tan", "acid"])
-                        and pd.notna(v)
-                    ]
-                
-                    if tan_cands:
-                        try:
-                            tan = float(tan_cands[0])
-                        except:
-                            tan = None
+                    # Buscar TAN / Acid
+                    for k,v in medias_dict.items():
+                        if any(x in str(k).lower() for x in ["tan","acid"]):
+                            if pd.notna(v):
+                                tan = float(v)
+                                break
+
 
 
 
