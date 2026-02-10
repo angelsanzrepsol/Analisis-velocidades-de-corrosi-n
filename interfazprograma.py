@@ -1132,6 +1132,71 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
 
     return fila.get(material)
 
+def calcular_perfil_teorico_por_segmentos(df_filtrado, segmentos, df_mpa, material):
+
+    if df_mpa is None:
+        return None
+
+    df_teo = df_filtrado[["Sent Time", "UT measurement (mm)"]].copy()
+    df_teo.rename(columns={"Sent Time": "Fecha"}, inplace=True)
+
+    df_teo["Vel_teorica"] = np.nan
+
+    # asignar velocidad teórica a cada fecha según segmento
+    for seg in segmentos:
+
+        if seg.get("estado") != "valido":
+            continue
+
+        medias = seg.get("medias")
+
+        if medias is None:
+            continue
+
+        medias_dict = dict(medias)
+
+        temp = medias_dict.get("T")
+        tan = medias_dict.get("TAN")
+
+        if pd.isna(temp) or pd.isna(tan):
+            continue
+
+        vel = buscar_velocidad_mas_cercana(
+            df_mpa,
+            float(temp),
+            float(tan),
+            material
+        )
+
+        fi = pd.to_datetime(seg["fecha_ini"])
+        ff = pd.to_datetime(seg["fecha_fin"])
+
+        mask = (df_teo["Fecha"] >= fi) & (df_teo["Fecha"] <= ff)
+
+        df_teo.loc[mask, "Vel_teorica"] = vel
+
+    # integrar velocidades → espesor teórico
+    espesor_teo = [df_teo["UT measurement (mm)"].iloc[0]]
+
+    fechas = pd.to_datetime(df_teo["Fecha"])
+
+    for i in range(1, len(df_teo)):
+
+        vel = df_teo["Vel_teorica"].iloc[i]
+
+        if pd.isna(vel):
+            espesor_teo.append(espesor_teo[-1])
+            continue
+
+        delta_dias = (fechas.iloc[i] - fechas.iloc[i-1]).days
+
+        perdida = vel * (delta_dias / 365.25)
+
+        espesor_teo.append(espesor_teo[-1] - perdida)
+
+    df_teo["Espesor_teorico"] = espesor_teo
+
+    return df_teo
 
 def dibujar_grafica_completa_fallback(df_filtrado, y_suave, segmentos_validos, descartados, segmentos_eliminados_idx, titulo="Velocidad de corrosión", figsize=(14,10), show=False):
     fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
@@ -2169,8 +2234,38 @@ with tabs[2]:
                 st.image(str(img_file), caption="Gráfica guardada (definitiva)")
             else:
                 try:
-                    fig, ax = dibujar_grafica_completa_wrapper(data['df_filtrado'], data['y_suave'], data['segmentos_validos'], data['descartados'], [], titulo=f"{data['hoja']}", figsize=(fig_w, fig_h), show=False)
+                    fig, ax = dibujar_grafica_completa_wrapper(
+                        data['df_filtrado'],
+                        data['y_suave'],
+                        data['segmentos_validos'],
+                        data['descartados'],
+                        [],
+                        titulo=f"{data['hoja']}",
+                        figsize=(fig_w, fig_h),
+                        show=False
+                    )
+                    
+                    df_teo = calcular_perfil_teorico_por_segmentos(
+                        data['df_filtrado'],
+                        data['segmentos_validos'],
+                        st.session_state.get("df_mpa"),
+                        material_sel
+                    )
+                    
+                    if df_teo is not None:
+                    
+                        ax.plot(
+                            df_teo["Fecha"],
+                            df_teo["Espesor_teorico"],
+                            linestyle="--",
+                            linewidth=2,
+                            label="Perfil teórico MPA"
+                        )
+                    
+                        ax.legend()
+                    
                     st.pyplot(fig)
+
                 except Exception as e:
                     st.error(f"No se pudo mostrar gráfica: {e}")
         with col2:
