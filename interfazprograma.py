@@ -1641,9 +1641,6 @@ with tabs[0]:
                             stored["segmentos_validos"], stored["descartados"], [],
                             titulo=f"Segmentación — {hoja_sel}", figsize=(fig_w, fig_h), show=False
                         )
-                        # Quitar leyenda solo en esta pestaña
-                        if ax.get_legend() is not None:
-                            ax.get_legend().remove()
 
                         st.pyplot(fig)
                     except Exception as e:
@@ -2435,6 +2432,9 @@ if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
                 data['segmentos_validos'], data['descartados'], [],
                 titulo=f"{data['hoja']}", figsize=(14,10)
             )
+            # Quitar leyenda solo en esta pestaña
+            if ax.get_legend() is not None:
+                ax.get_legend().remove()
 
             img_global_path = carpeta / f"{nombre_base}_grafica.png"
             fig.savefig(img_global_path, dpi=200, bbox_inches="tight")
