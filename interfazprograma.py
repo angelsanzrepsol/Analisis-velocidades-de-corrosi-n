@@ -2285,7 +2285,10 @@ with tabs[2]:
                             label="Perfil teórico MPA"
                         )
                     
-                        ax.legend()
+                     # Quitar leyenda solo en esta pestaña
+                    if ax.get_legend() is not None:
+                        ax.get_legend().remove()
+
                     
                     st.pyplot(fig)
 
