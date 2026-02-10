@@ -489,7 +489,13 @@ def dividir_segmento_por_intervalo(
                 (df_proc["Fecha"] >= sub_ini) &
                 (df_proc["Fecha"] <= sub_fin)
             ]
+        
             medias = sub_proc.mean(numeric_only=True)
+        
+            # ⭐ FALLBACK SI NO HAY DATOS EN EL SEGMENTO
+            if medias.empty:
+                medias = df_proc.mean(numeric_only=True)
+
 
         nuevos_segmentos.append({
             "ini": sub_df.index.min(),
@@ -541,7 +547,11 @@ def aplicar_segmentacion_referencia(
                 (df_proc["Fecha"] >= fi) &
                 (df_proc["Fecha"] <= ff)
             ]
+        
             medias = sub_proc.mean(numeric_only=True)
+        
+            if medias.empty:
+                medias = df_proc.mean(numeric_only=True)
 
         nuevos_segmentos.append({
             "ini": sub_df.index.min(),
@@ -1054,6 +1064,9 @@ def extraer_segmentos_validos_fallback(df_filtrado, y_suave, segmentos_raw, df_p
                 
                 # Finalmente, calcular medias
                 medias = sub.mean(numeric_only=True)
+                if medias.empty and df_proc is not None:
+                    medias = df_proc.mean(numeric_only=True)
+                
 
             except Exception:
                 medias = pd.Series(dtype=float)
