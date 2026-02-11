@@ -2299,9 +2299,48 @@ with tabs[2]:
             st.write(f"Segmentos válidos: {len(data['segmentos_validos'])} — Descartados: {len(data['descartados'])}")
             try:
                 try:
-                    ut_vals = data['df_filtrado']['UT measurement (mm)']
-                
-                    perdida_grosor = ut_vals.iloc[0] - ut_vals.iloc[-1]
+                    try:
+                        ut_vals = data['df_filtrado']['UT measurement (mm)']
+                    
+                        # 🔹 Pérdida REAL
+                        perdida_real = ut_vals.iloc[0] - ut_vals.iloc[-1]
+                    
+                        st.metric(
+                            label="Pérdida total REAL (mm)",
+                            value=f"{perdida_real:.4f}"
+                        )
+                    
+                        # 🔹 Pérdida TEÓRICA
+                        df_teo = calcular_perfil_teorico_por_segmentos(
+                            data['df_filtrado'],
+                            data['segmentos_validos'],
+                            st.session_state.get("df_mpa"),
+                            material_sel
+                        )
+                    
+                        if df_teo is not None:
+                    
+                            perdida_teorica = (
+                                df_teo["Espesor_teorico"].iloc[0]
+                                - df_teo["Espesor_teorico"].iloc[-1]
+                            )
+                    
+                            st.metric(
+                                label="Pérdida total TEÓRICA MPA (mm)",
+                                value=f"{perdida_teorica:.4f}"
+                            )
+                    
+                            # 🔹 Diferencia modelo
+                            diferencia = perdida_real - perdida_teorica
+                    
+                            st.metric(
+                                label="Diferencia REAL - TEÓRICA (mm)",
+                                value=f"{diferencia:.4f}"
+                            )
+                    
+                    except Exception:
+                        st.write("No se pudo calcular pérdidas de grosor")
+
                 
                     st.metric(
                         label="Pérdida total de grosor (mm)",
