@@ -127,7 +127,6 @@ def clasificar_calidad(r2):
 
 def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
 
-    # Filtrar solo sondas guardadas
     processed = {
         k: v for k, v in processed_sheets.items()
         if v.get("saved")
@@ -136,7 +135,6 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
     if not processed:
         return pd.DataFrame()
 
-    # Usar primera sonda como base temporal
     primera = list(processed.values())[0]
     segmentos_base = primera["segmentos_validos"]
 
@@ -155,14 +153,16 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
 
         velocidades = []
 
-        # =============================
-        # VELOCIDADES POR SONDA
-        # =============================
+        # =========================================
+        # COLUMNAS POR SONDA (Vel + Calidad)
+        # =========================================
 
         for key, data in processed.items():
 
             nombre_sonda = f"{data['source_name']} | {data['hoja']}"
+
             vel = None
+            calidad = None
 
             for seg in data["segmentos_validos"]:
 
@@ -170,17 +170,25 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
                 ff = pd.to_datetime(seg["fecha_fin"])
 
                 if fi == fi_ref and ff == ff_ref:
+
                     vel = seg.get("vel_abs")
+
+                    calidad = calcular_calidad_segmento(
+                        data["df_filtrado"],
+                        seg
+                    )
+
                     break
 
-            fila[nombre_sonda] = vel
+            fila[f"{nombre_sonda} Velocidad"] = vel
+            fila[f"{nombre_sonda} Calidad R2"] = calidad
 
             if vel is not None:
                 velocidades.append(vel)
 
-        # =============================
+        # =========================================
         # ESTADÍSTICAS ENTRE SONDAS
-        # =============================
+        # =========================================
 
         if velocidades:
             media = np.mean(velocidades)
@@ -193,9 +201,9 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
         fila["Desviación estándar"] = std
         fila["Coef Variación (%)"] = cv
 
-        # =============================
-        # VELOCIDAD ESPERADA (MPA)
-        # =============================
+        # =========================================
+        # VELOCIDAD ESPERADA MPA
+        # =========================================
 
         vel_esperada = None
 
@@ -221,12 +229,12 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
             fila["Dif Real vs Esperada"] = media - vel_esperada
             fila["Dif absoluta"] = abs(fila["Dif Real vs Esperada"])
 
-        # =============================
-        # VARIABLES PROCESO (UNA VEZ)
-        # =============================
+        # =========================================
+        # VARIABLES PROCESO (una sola vez)
+        # =========================================
 
         if isinstance(medias_proc, (dict, pd.Series)):
-            for k,v in dict(medias_proc).items():
+            for k, v in dict(medias_proc).items():
                 fila[k] = v
 
         filas.append(fila)
