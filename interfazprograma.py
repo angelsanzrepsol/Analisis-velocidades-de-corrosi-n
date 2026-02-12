@@ -1844,12 +1844,11 @@ with tabs[0]:
                         # =========================
                         
                         if btn_dividir_global:
-                        
+
                             if key in st.session_state["processed_sheets"]:
                         
                                 data = st.session_state["processed_sheets"][key]
                         
-                                # Crear offset
                                 if tipo_intervalo_global == "Días":
                                     offset = pd.DateOffset(days=valor_intervalo_global)
                                 elif tipo_intervalo_global == "Meses":
@@ -1865,9 +1864,10 @@ with tabs[0]:
                                     offset,
                                     min_dias=min_dias_seg
                                 )
+                        
                                 nuevos = sorted(nuevos, key=lambda x: x["fecha_ini"])
                         
-                                # Guardar historial para deshacer
+                                # Guardar historial
                                 if "historial_segmentos" not in data:
                                     data["historial_segmentos"] = []
                         
@@ -1875,15 +1875,8 @@ with tabs[0]:
                                     data["segmentos_validos"].copy()
                                 )
                         
-                                data["segmentos_validos"] = nuevos
-
-                                # 🔥 FORZAR ACTUALIZACIÓN GRÁFICA
                                 st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos
                                 st.session_state["processed_sheets"][key]["manually_modified"] = True
-                                
-                                st.rerun()
-
-                                data["manually_modified"] = True
                         
                                 st.success("División global aplicada")
                                 st.rerun()
