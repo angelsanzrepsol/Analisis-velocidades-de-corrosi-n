@@ -82,6 +82,73 @@ def exportar_configuracion_json():
 
     return json.dumps(config_safe, indent=4)
 
+def construir_tabla_maestra(processed_sheets, df_mpa, material):
+    filas = []
+
+    # Base referencia
+    if "segmentacion_referencia" in st.session_state:
+        base_segmentos = st.session_state["segmentacion_referencia"]
+    else:
+        primera = next(iter(processed_sheets.values()))
+        base_segmentos = primera["segmentos_validos"]
+
+    for key, data in processed_sheets.items():
+
+        if not data.get("saved"):
+            continue
+
+        sonda = data["source_name"]
+        hoja = data["hoja"]
+
+        for i, seg in enumerate(data["segmentos_validos"], start=1):
+
+            fila = {
+                "Sonda": sonda,
+                "Hoja": hoja,
+                "Segmento": i,
+                "Inicio": seg.get("fecha_ini"),
+                "Fin": seg.get("fecha_fin"),
+                "Dias": seg.get("delta_dias"),
+                "Velocidad real": seg.get("vel_abs")
+            }
+
+            # ------------------------
+            # MPA
+            # ------------------------
+            vel_esp = None
+
+            medias = seg.get("medias")
+
+            if medias is not None and isinstance(medias, (dict, pd.Series)):
+
+                md = dict(medias)
+
+                temp = md.get("T")
+                tan = md.get("TAN")
+
+                vel_esp = buscar_velocidad_mas_cercana(
+                    df_mpa,
+                    temp,
+                    tan,
+                    material
+                )
+
+            fila["Velocidad esperada"] = vel_esp
+
+            if vel_esp is not None:
+                fila["Dif Real vs Esperada"] = fila["Velocidad real"] - vel_esp
+                fila["Dif abs"] = abs(fila["Dif Real vs Esperada"])
+
+            # ------------------------
+            # Variables proceso
+            # ------------------------
+            if isinstance(medias, (dict, pd.Series)):
+                for k,v in dict(medias).items():
+                    fila[k] = v
+
+            filas.append(fila)
+
+    return pd.DataFrame(filas)
 
 def json_safe(obj):
 
@@ -2040,135 +2107,29 @@ with tabs[2]:
         ["Carbon Steel", "5 Cr"],
         horizontal=True
     )
-    df_mpa = st.session_state.get("df_mpa")
-    processed = {
-        k: v for k, v in st.session_state.get("processed_sheets", {}).items()
-        if v.get("saved")
-    }
+    st.subheader("Tabla maestra global")
+    df_maestra = construir_tabla_maestra(
+        st.session_state.get("processed_sheets", {}),
+        st.session_state.get("df_mpa"),
+        material_sel
+    )
     
-    if len(processed) == 0:
-    
-        st.info("No hay sondas guardadas aún.")
-    
+    if df_maestra.empty:
+        st.info("No hay datos para mostrar")
     else:
     
-        # -----------------------------
-        # Elegir base de segmentación
-        # -----------------------------
+        st.dataframe(df_maestra)
     
-        if "segmentacion_referencia" in st.session_state:
-            segmentos_base = st.session_state["segmentacion_referencia"]
-        else:
-            # usar primera sonda guardada
-            primera = list(processed.values())[0]
-            segmentos_base = primera["segmentos_validos"]
-    
-        filas = []
-
-        for i, seg_base in enumerate(segmentos_base, start=1):
-        
-            fila = {"Segmento": f"Seg {i}"}
-        
-            # -------- VELOCIDAD ESPERADA --------
-        
-            vel_esperada = None
-            df_mpa = st.session_state.get("df_mpa")
-        
-            if df_mpa is not None:
-        
-                medias = seg_base.get("medias", {})
-
-        
-                temp = None
-                tan = None
-                
-                if isinstance(medias, (dict, pd.Series)):
-                
-                    medias_dict = dict(medias)
-                
-                    # ✔ TU EXCEL REAL USA ESTOS NOMBRES
-                    temp = next((v for k,v in medias_dict.items() if k.upper() == "T"), None)
-                    tan = next((v for k,v in medias_dict.items() if k.upper() == "TAN"), None)
-
-                    if pd.notna(temp):
-                        temp = float(temp)
-                
-                    if pd.notna(tan):
-                        tan = float(tan)
-
-                vel_esperada = buscar_velocidad_mas_cercana(
-                    df_mpa,
-                    temp,
-                    tan,
-                    material_sel
-                )
-        
-            fila["Velocidad esperada"] = vel_esperada
-        
-            # -------- VELOCIDADES SONDAS --------
-    
-            fi_ref = pd.to_datetime(seg_base["fecha_ini"])
-            ff_ref = pd.to_datetime(seg_base["fecha_fin"])
-    
-            # recorrer sondas
-            for key, data in processed.items():
-    
-                nombre_sonda = f"{data['source_name']} | {data['hoja']}"
-    
-                vel = None
-    
-                for seg in data["segmentos_validos"]:
-    
-                    fi = pd.to_datetime(seg["fecha_ini"])
-                    ff = pd.to_datetime(seg["fecha_fin"])
-    
-                    # ✔ coincidencia exacta
-                    if fi == fi_ref and ff == ff_ref:
-                        vel = seg.get("vel_abs")
-                        break
-    
-                fila[nombre_sonda] = vel
-    
-            filas.append(fila)
-    
-        df_comp = pd.DataFrame(filas)
-        
-        # =========================
-        # ESTADÍSTICAS ENTRE SONDAS
-        # =========================
-        
-        cols_sondas = [
-            c for c in df_comp.columns
-            if c not in ["Segmento", "Velocidad esperada"]
-        ]
-        
-        df_comp["Media velocidades"] = df_comp[cols_sondas].mean(axis=1)
-        df_comp["Desv Std velocidades"] = df_comp[cols_sondas].std(axis=1)
-        
-        df_comp["Coef Variación (%)"] = (
-            df_comp["Desv Std velocidades"] /
-            df_comp["Media velocidades"]
-        ) * 100
-        
-        df_comp["Dif Real vs Esperada"] = (
-            df_comp["Media velocidades"] -
-            df_comp["Velocidad esperada"]
-        )
-        
-        df_comp["Dif absoluta"] = df_comp["Dif Real vs Esperada"].abs()
-
-        st.dataframe(df_comp)
-    
-        # Exportar
         buffer = io.BytesIO()
-        df_comp.to_excel(buffer, index=False)
+        df_maestra.to_excel(buffer, index=False)
         buffer.seek(0)
     
         st.download_button(
-            "Descargar comparativa",
+            "Descargar tabla maestra",
             buffer,
-            file_name="comparativa_sondas.xlsx"
+            file_name="tabla_maestra_corrosion.xlsx"
         )
+
 
     if "processed_sheets" in st.session_state and st.session_state["processed_sheets"]:
         opciones = list(st.session_state["processed_sheets"].keys())
