@@ -81,21 +81,60 @@ def exportar_configuracion_json():
     config_safe = json_safe(config)
 
     return json.dumps(config_safe, indent=4)
+from sklearn.linear_model import LinearRegression
+
+def calcular_calidad_segmento(df_filtrado, seg):
+
+    try:
+
+        i = int(seg["ini"])
+        f = int(seg["fin"])
+
+        sub = df_filtrado.iloc[i:f]
+
+        if len(sub) < 3:
+            return None
+
+        fechas = pd.to_datetime(sub["Sent Time"])
+        ut = sub["UT measurement (mm)"].values
+
+        # convertir tiempo a días desde inicio
+        t = (fechas - fechas.iloc[0]).dt.days.values.reshape(-1,1)
+
+        model = LinearRegression().fit(t, ut)
+
+        r2 = model.score(t, ut)
+
+        return round(r2, 4)
+
+    except:
+        return None
+def clasificar_calidad(r2):
+
+    if r2 is None:
+        return "Sin datos"
+
+    if r2 > 0.95:
+        return "Excelente"
+    elif r2 > 0.90:
+        return "Muy buena"
+    elif r2 > 0.80:
+        return "Aceptable"
+    elif r2 > 0.60:
+        return "Baja"
+    else:
+        return "Muy baja"
 
 def construir_tabla_maestra(processed_sheets, df_mpa, material):
-    filas = []
 
-    # Base referencia
-    if "segmentacion_referencia" in st.session_state:
-        base_segmentos = st.session_state["segmentacion_referencia"]
-    else:
-        primera = next(iter(processed_sheets.values()))
-        base_segmentos = primera["segmentos_validos"]
+    filas = []
 
     for key, data in processed_sheets.items():
 
         if not data.get("saved"):
             continue
+
+        df_filtrado = data["df_filtrado"]
 
         sonda = data["source_name"]
         hoja = data["hoja"]
@@ -112,11 +151,23 @@ def construir_tabla_maestra(processed_sheets, df_mpa, material):
                 "Velocidad real": seg.get("vel_abs")
             }
 
-            # ------------------------
-            # MPA
-            # ------------------------
-            vel_esp = None
+            # ======================
+            # Calidad cálculo
+            # ======================
 
+            fila["Calidad cálculo velocidad (R2)"] = calcular_calidad_segmento(
+                df_filtrado,
+                seg
+            )
+            r2 = calcular_calidad_segmento(df_filtrado, seg)
+            fila["Calidad cálculo velocidad (R2)"] = r2
+            fila["Calidad cálculo (texto)"] = clasificar_calidad(r2)
+
+            # ======================
+            # MPA
+            # ======================
+
+            vel_esp = None
             medias = seg.get("medias")
 
             if medias is not None and isinstance(medias, (dict, pd.Series)):
@@ -126,22 +177,24 @@ def construir_tabla_maestra(processed_sheets, df_mpa, material):
                 temp = md.get("T")
                 tan = md.get("TAN")
 
-                vel_esp = buscar_velocidad_mas_cercana(
-                    df_mpa,
-                    temp,
-                    tan,
-                    material
-                )
+                if df_mpa is not None:
+                    vel_esp = buscar_velocidad_mas_cercana(
+                        df_mpa,
+                        temp,
+                        tan,
+                        material
+                    )
 
             fila["Velocidad esperada"] = vel_esp
 
-            if vel_esp is not None:
+            if vel_esp is not None and fila["Velocidad real"] is not None:
                 fila["Dif Real vs Esperada"] = fila["Velocidad real"] - vel_esp
                 fila["Dif abs"] = abs(fila["Dif Real vs Esperada"])
 
-            # ------------------------
+            # ======================
             # Variables proceso
-            # ------------------------
+            # ======================
+
             if isinstance(medias, (dict, pd.Series)):
                 for k,v in dict(medias).items():
                     fila[k] = v
@@ -603,6 +656,7 @@ def aplicar_segmentacion_referencia(
         segmentos_ref,
         df_proc,
         vars_proceso,
+        segmentos_validos_previos=None,
         min_dias=5
 ):
     nuevos_segmentos = []
@@ -611,6 +665,20 @@ def aplicar_segmentacion_referencia(
 
         fi = ref["fecha_ini"]
         ff = ref["fecha_fin"]
+
+        # 🔥 SOLO permitir dentro de zonas previamente válidas
+        if segmentos_validos_previos is not None:
+
+            solapa = False
+
+            for s in segmentos_validos_previos:
+
+                if not (ff < s["fecha_ini"] or fi > s["fecha_fin"]):
+                    solapa = True
+                    break
+
+            if not solapa:
+                continue
 
         sub_df = df_filtrado[
             (df_filtrado["Sent Time"] >= fi) &
@@ -634,9 +702,9 @@ def aplicar_segmentacion_referencia(
                 (df_proc["Fecha"] >= fi) &
                 (df_proc["Fecha"] <= ff)
             ]
-        
+
             medias = sub_proc.mean(numeric_only=True)
-        
+
             if medias.empty:
                 medias = df_proc.mean(numeric_only=True)
 
@@ -2108,27 +2176,32 @@ with tabs[2]:
         horizontal=True
     )
     st.subheader("Tabla maestra global")
+
     df_maestra = construir_tabla_maestra(
         st.session_state.get("processed_sheets", {}),
         st.session_state.get("df_mpa"),
         material_sel
     )
+    df_maestra = construir_tabla_maestra(
+    st.session_state["processed_sheets"],
+    st.session_state.get("df_mpa"),
+    material_sel
+    )
     
-    if df_maestra.empty:
-        st.info("No hay datos para mostrar")
-    else:
+    st.subheader("Tabla maestra global")
     
-        st.dataframe(df_maestra)
+    st.dataframe(df_maestra)
     
-        buffer = io.BytesIO()
-        df_maestra.to_excel(buffer, index=False)
-        buffer.seek(0)
+    buffer = io.BytesIO()
+    df_maestra.to_excel(buffer, index=False)
+    buffer.seek(0)
     
-        st.download_button(
-            "Descargar tabla maestra",
-            buffer,
-            file_name="tabla_maestra_corrosion.xlsx"
-        )
+    st.download_button(
+        "Descargar tabla maestra",
+        buffer,
+        file_name="tabla_maestra_corrosion.xlsx"
+    )
+
 
 
     if "processed_sheets" in st.session_state and st.session_state["processed_sheets"]:
