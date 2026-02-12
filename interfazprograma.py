@@ -83,6 +83,35 @@ def exportar_configuracion_json():
     return json.dumps(config_safe, indent=4)
 from sklearn.linear_model import LinearRegression
 
+def dividir_todos_segmentos(
+        df_filtrado,
+        segmentos,
+        df_proc,
+        vars_proceso,
+        offset,
+        min_dias=5
+):
+
+    nuevos = []
+
+    for seg in segmentos:
+
+        partes = dividir_segmento_por_intervalo(
+            df_filtrado,
+            seg,
+            df_proc,
+            vars_proceso,
+            offset,
+            min_dias=min_dias
+        )
+
+        if partes:
+            nuevos.extend(partes)
+        else:
+            nuevos.append(seg)
+
+    return sorted(nuevos, key=lambda x: x["fecha_ini"])
+
 def calcular_calidad_segmento(df_filtrado, seg):
 
     try:
@@ -974,6 +1003,23 @@ uploaded_mpa = st.sidebar.file_uploader(
     type=["xlsx"],
     key="file_uploader_mpa"
 )
+st.sidebar.markdown("---")
+st.sidebar.header("División global de segmentos")
+
+tipo_intervalo_global = st.sidebar.selectbox(
+    "Tipo intervalo global",
+    ["Días", "Meses", "Años"],
+    key="tipo_intervalo_global"
+)
+
+valor_intervalo_global = st.sidebar.number_input(
+    "Cantidad intervalo global",
+    min_value=1,
+    value=30,
+    key="valor_intervalo_global"
+)
+
+btn_dividir_global = st.sidebar.button("Dividir TODA la gráfica")
 
 def cargar_y_limpiar_mpa(uploaded_file):
 
@@ -1793,6 +1839,47 @@ with tabs[0]:
                     key = f"proc|{uploaded_corr.name}|{hoja_sel}"
 
                     if key not in st.session_state["processed_sheets"]:
+                        # =========================
+                        # DIVISIÓN GLOBAL
+                        # =========================
+                        
+                        if btn_dividir_global:
+                        
+                            if key in st.session_state["processed_sheets"]:
+                        
+                                data = st.session_state["processed_sheets"][key]
+                        
+                                # Crear offset
+                                if tipo_intervalo_global == "Días":
+                                    offset = pd.DateOffset(days=valor_intervalo_global)
+                                elif tipo_intervalo_global == "Meses":
+                                    offset = pd.DateOffset(months=valor_intervalo_global)
+                                else:
+                                    offset = pd.DateOffset(years=valor_intervalo_global)
+                        
+                                nuevos = dividir_todos_segmentos(
+                                    data["df_filtrado"],
+                                    data["segmentos_validos"],
+                                    df_proc,
+                                    vars_proceso,
+                                    offset,
+                                    min_dias=min_dias_seg
+                                )
+                        
+                                # Guardar historial para deshacer
+                                if "historial_segmentos" not in data:
+                                    data["historial_segmentos"] = []
+                        
+                                data["historial_segmentos"].append(
+                                    data["segmentos_validos"].copy()
+                                )
+                        
+                                data["segmentos_validos"] = nuevos
+                                data["manually_modified"] = True
+                        
+                                st.success("División global aplicada")
+                                st.rerun()
+
                         st.session_state["processed_sheets"][key] = {
                             "df_original": df_original,
                             "df_filtrado": df_filtrado,
