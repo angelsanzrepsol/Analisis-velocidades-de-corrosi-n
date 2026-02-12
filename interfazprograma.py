@@ -143,24 +143,24 @@ def clasificar_calidad(r2):
     if r2 is None:
         return "Sin datos"
 
-    if r2 > 0.95:
+    if r2 >= 0.80:
         return "Excelente"
-    elif r2 > 0.90:
+    elif r2 >= 0.65:
         return "Muy buena"
-    elif r2 > 0.80:
+    elif r2 >= 0.50:
+        return "Buena"
+    elif r2 >= 0.30:
         return "Aceptable"
-    elif r2 > 0.60:
-        return "Baja"
     else:
-        return "Muy baja"
-    
+        return "Baja"
+
 def color_calidad(val):
     colores = {
-        "Excelente": "background-color: #8BC34A",
-        "Muy buena": "background-color: #CDDC39",
+        "Excelente": "background-color: #4CAF50",
+        "Muy buena": "background-color: #8BC34A",
+        "Buena": "background-color: #CDDC39",
         "Aceptable": "background-color: #FFC107",
-        "Baja": "background-color: #FF9800",
-        "Muy baja": "background-color: #F44336"
+        "Baja": "background-color: #F44336"
     }
     return colores.get(val, "")
 
