@@ -182,6 +182,20 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
 
             fila[f"{nombre_sonda} Velocidad"] = vel
             fila[f"{nombre_sonda} Calidad R2"] = calidad
+            def clasificar_calidad(r2):
+                if r2 is None:
+                    return "Sin datos"
+            
+                if r2 > 0.95:
+                    return "Excelente"
+                elif r2 > 0.90:
+                    return "Muy buena"
+                elif r2 > 0.80:
+                    return "Aceptable"
+                elif r2 > 0.60:
+                    return "Baja"
+                else:
+                    return "Muy baja"
 
             if vel is not None:
                 velocidades.append(vel)
