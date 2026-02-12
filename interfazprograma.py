@@ -124,6 +124,16 @@ def clasificar_calidad(r2):
         return "Baja"
     else:
         return "Muy baja"
+    
+def color_calidad(val):
+    colores = {
+        "Excelente": "background-color: #8BC34A",
+        "Muy buena": "background-color: #CDDC39",
+        "Aceptable": "background-color: #FFC107",
+        "Baja": "background-color: #FF9800",
+        "Muy baja": "background-color: #F44336"
+    }
+    return colores.get(val, "")
 
 def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
 
@@ -177,26 +187,13 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
                         data["df_filtrado"],
                         seg
                     )
-
+                    texto_calidad = clasificar_calidad(calidad)
                     break
 
             fila[f"{nombre_sonda} Velocidad"] = vel
             fila[f"{nombre_sonda} Calidad R2"] = calidad
-            def clasificar_calidad(r2):
-                if r2 is None:
-                    return "Sin datos"
+            fila[f"{nombre_sonda} Calidad"] = texto_calidad
             
-                if r2 > 0.95:
-                    return "Excelente"
-                elif r2 > 0.90:
-                    return "Muy buena"
-                elif r2 > 0.80:
-                    return "Aceptable"
-                elif r2 > 0.60:
-                    return "Baja"
-                else:
-                    return "Muy baja"
-
             if vel is not None:
                 velocidades.append(vel)
 
@@ -2235,13 +2232,19 @@ with tabs[2]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-    
+   
+
     if df_comp.empty:
         st.info("No hay sondas guardadas aún.")
     else:
     
-        st.dataframe(df_comp)
-    
+        st.dataframe(
+            df_comp.style.applymap(
+                color_calidad,
+                subset=[col for col in df_comp.columns if "Calidad" in col]
+            )
+        )
+
         buffer = io.BytesIO()
         df_comp.to_excel(buffer, index=False)
         buffer.seek(0)
