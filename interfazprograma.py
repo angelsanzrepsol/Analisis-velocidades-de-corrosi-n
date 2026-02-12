@@ -222,7 +222,7 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
             fila[f"{nombre_sonda} Velocidad"] = vel
             fila[f"{nombre_sonda} Calidad R2"] = calidad
             fila[f"{nombre_sonda} Calidad"] = texto_calidad
-            
+            fila["Días segmento"] = seg.get("delta_dias")
             if vel is not None:
                 velocidades.append(vel)
 
