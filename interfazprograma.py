@@ -125,81 +125,111 @@ def clasificar_calidad(r2):
     else:
         return "Muy baja"
 
-def construir_tabla_maestra(processed_sheets, df_mpa, material):
+def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
+
+    # Filtrar solo sondas guardadas
+    processed = {
+        k: v for k, v in processed_sheets.items()
+        if v.get("saved")
+    }
+
+    if not processed:
+        return pd.DataFrame()
+
+    # Usar primera sonda como base temporal
+    primera = list(processed.values())[0]
+    segmentos_base = primera["segmentos_validos"]
 
     filas = []
 
-    for key, data in processed_sheets.items():
+    for i, seg_base in enumerate(segmentos_base, start=1):
 
-        if not data.get("saved"):
-            continue
+        fila = {
+            "Segmento": f"Seg {i}",
+            "Inicio": seg_base.get("fecha_ini"),
+            "Fin": seg_base.get("fecha_fin")
+        }
 
-        df_filtrado = data["df_filtrado"]
+        fi_ref = pd.to_datetime(seg_base["fecha_ini"])
+        ff_ref = pd.to_datetime(seg_base["fecha_fin"])
 
-        sonda = data["source_name"]
-        hoja = data["hoja"]
+        velocidades = []
 
-        for i, seg in enumerate(data["segmentos_validos"], start=1):
+        # =============================
+        # VELOCIDADES POR SONDA
+        # =============================
 
-            fila = {
-                "Sonda": sonda,
-                "Hoja": hoja,
-                "Segmento": i,
-                "Inicio": seg.get("fecha_ini"),
-                "Fin": seg.get("fecha_fin"),
-                "Dias": seg.get("delta_dias"),
-                "Velocidad real": seg.get("vel_abs")
-            }
+        for key, data in processed.items():
 
-            # ======================
-            # Calidad cálculo
-            # ======================
+            nombre_sonda = f"{data['source_name']} | {data['hoja']}"
+            vel = None
 
-            fila["Calidad cálculo velocidad (R2)"] = calcular_calidad_segmento(
-                df_filtrado,
-                seg
+            for seg in data["segmentos_validos"]:
+
+                fi = pd.to_datetime(seg["fecha_ini"])
+                ff = pd.to_datetime(seg["fecha_fin"])
+
+                if fi == fi_ref and ff == ff_ref:
+                    vel = seg.get("vel_abs")
+                    break
+
+            fila[nombre_sonda] = vel
+
+            if vel is not None:
+                velocidades.append(vel)
+
+        # =============================
+        # ESTADÍSTICAS ENTRE SONDAS
+        # =============================
+
+        if velocidades:
+            media = np.mean(velocidades)
+            std = np.std(velocidades, ddof=1) if len(velocidades) > 1 else 0
+            cv = (std / media) * 100 if media != 0 else None
+        else:
+            media, std, cv = None, None, None
+
+        fila["Media velocidades"] = media
+        fila["Desviación estándar"] = std
+        fila["Coef Variación (%)"] = cv
+
+        # =============================
+        # VELOCIDAD ESPERADA (MPA)
+        # =============================
+
+        vel_esperada = None
+
+        medias_proc = seg_base.get("medias")
+
+        if df_mpa is not None and isinstance(medias_proc, (dict, pd.Series)):
+
+            md = dict(medias_proc)
+
+            temp = md.get("T")
+            tan = md.get("TAN")
+
+            vel_esperada = buscar_velocidad_mas_cercana(
+                df_mpa,
+                temp,
+                tan,
+                material
             )
-            r2 = calcular_calidad_segmento(df_filtrado, seg)
-            fila["Calidad cálculo velocidad (R2)"] = r2
-            fila["Calidad cálculo (texto)"] = clasificar_calidad(r2)
 
-            # ======================
-            # MPA
-            # ======================
+        fila["Velocidad esperada"] = vel_esperada
 
-            vel_esp = None
-            medias = seg.get("medias")
+        if vel_esperada is not None and media is not None:
+            fila["Dif Real vs Esperada"] = media - vel_esperada
+            fila["Dif absoluta"] = abs(fila["Dif Real vs Esperada"])
 
-            if medias is not None and isinstance(medias, (dict, pd.Series)):
+        # =============================
+        # VARIABLES PROCESO (UNA VEZ)
+        # =============================
 
-                md = dict(medias)
+        if isinstance(medias_proc, (dict, pd.Series)):
+            for k,v in dict(medias_proc).items():
+                fila[k] = v
 
-                temp = md.get("T")
-                tan = md.get("TAN")
-
-                if df_mpa is not None:
-                    vel_esp = buscar_velocidad_mas_cercana(
-                        df_mpa,
-                        temp,
-                        tan,
-                        material
-                    )
-
-            fila["Velocidad esperada"] = vel_esp
-
-            if vel_esp is not None and fila["Velocidad real"] is not None:
-                fila["Dif Real vs Esperada"] = fila["Velocidad real"] - vel_esp
-                fila["Dif abs"] = abs(fila["Dif Real vs Esperada"])
-
-            # ======================
-            # Variables proceso
-            # ======================
-
-            if isinstance(medias, (dict, pd.Series)):
-                for k,v in dict(medias).items():
-                    fila[k] = v
-
-            filas.append(fila)
+        filas.append(fila)
 
     return pd.DataFrame(filas)
 
@@ -2175,65 +2205,30 @@ with tabs[2]:
         ["Carbon Steel", "5 Cr"],
         horizontal=True
     )
-    st.subheader("Tabla maestra global")
 
-    df_maestra = construir_tabla_maestra(
+    st.markdown("## Comparativa global por segmento")
+
+    df_comp = construir_tabla_segmentos_comparativa(
         st.session_state.get("processed_sheets", {}),
         st.session_state.get("df_mpa"),
         material_sel
     )
-    df_maestra = construir_tabla_maestra(
-    st.session_state["processed_sheets"],
-    st.session_state.get("df_mpa"),
-    material_sel
-    )
     
-    st.subheader("Tabla maestra global")
-    
-    st.dataframe(df_maestra)
-    
-    buffer = io.BytesIO()
-    df_maestra.to_excel(buffer, index=False)
-    buffer.seek(0)
-    
-    st.download_button(
-        "Descargar tabla maestra",
-        buffer,
-        file_name="tabla_maestra_corrosion.xlsx"
-    )
-
-
-
-    if "processed_sheets" in st.session_state and st.session_state["processed_sheets"]:
-        opciones = list(st.session_state["processed_sheets"].keys())
-        sel_key = st.selectbox("Selecciona hoja procesada", options=opciones)
-        datos = st.session_state["processed_sheets"][sel_key]
-        segs = datos.get("segmentos_validos", [])
-
-        df_medias = pd.DataFrame([
-            {"Segmento": i + 1, "Velocidad (mm/año)": s.get("vel_abs"), **(s.get("medias", {}))}
-            for i, s in enumerate(segs)
-            if s.get("estado") == "valido"
-        ])
-
-        if df_medias.empty:
-            st.info("No hay datos de medias por segmento para mostrar.")
-        else:
-            st.subheader("Medias por segmento")
-            st.dataframe(df_medias)
-
-            columnas_vars = [c for c in df_medias.columns if c not in ["Segmento", "Velocidad (mm/año)"]]
-            if columnas_vars:
-                var_sel = st.selectbox("Variable de proceso a graficar:", options=columnas_vars)
-                st.markdown(f"**Gráfica: {var_sel} vs Velocidad (mm/año)**")
-                fig, ax = plt.subplots(figsize=(8, 5))
-                ax.scatter(df_medias["Velocidad (mm/año)"], df_medias[var_sel], alpha=0.7)
-                ax.set_xlabel("Velocidad de corrosión (mm/año)")
-                ax.set_ylabel(var_sel)
-                ax.grid(True, alpha=0.4)
-                st.pyplot(fig)
+    if df_comp.empty:
+        st.info("No hay sondas guardadas aún.")
     else:
-        st.info("No hay hojas procesadas aún. Procesa primero una hoja en la pestaña 'Procesar hoja'.")
+    
+        st.dataframe(df_comp)
+    
+        buffer = io.BytesIO()
+        df_comp.to_excel(buffer, index=False)
+        buffer.seek(0)
+    
+        st.download_button(
+            "Descargar comparativa completa",
+            buffer,
+            file_name="comparativa_global_segmentos.xlsx"
+        )
 
     saved_list = [k for k,v in st.session_state.get("processed_sheets", {}).items() if v.get("saved")]
     if not saved_list:
@@ -2451,30 +2446,6 @@ with tabs[2]:
                 except Exception as e:
                     st.error(f"Error ejecutando guardar_resultados: {e}")
 
-        st.markdown("### Tabla definitiva — medias por segmento (si hay datos de proceso)")
-        rows = []
-        for idx,s in enumerate(data['segmentos_validos'], start=1):
-            row = {'Segmento': idx, 'Inicio': s.get('fecha_ini'), 'Fin': s.get('fecha_fin'), 'Días': s.get('delta_dias'), 'Vel (mm/año)': s.get('vel_abs')}
-            medias = s.get('medias')
-            if medias is not None and isinstance(medias, (pd.Series, dict)):
-                try:
-                    for var, val in (medias.items() if isinstance(medias, dict) else medias.items()):
-                        row[var] = val
-                except Exception:
-                    pass
-            rows.append(row)
-        if rows:
-            df_rows = pd.DataFrame(rows)
-            st.dataframe(df_rows)
-        if 'df_rows' in locals() and not df_rows.empty:
-            st.write("### Medias de variables de proceso por segmento")
-            columnas_medias = [c for c in df_rows.columns if c not in ['Segmento', 'Inicio', 'Fin', 'Días', 'Vel (mm/año)']]
-            if columnas_medias:
-                st.dataframe(df_rows[columnas_medias].round(4))
-            else:
-                st.info("No se encontraron variables de proceso en los segmentos.")
-        else:
-            st.write("No hay segmentos válidos para este procesado.")
 st.markdown("---")
 st.subheader("Exportación masiva")
 
