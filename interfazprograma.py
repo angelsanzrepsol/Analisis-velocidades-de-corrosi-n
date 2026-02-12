@@ -735,70 +735,103 @@ def aplicar_segmentacion_referencia(
         df_proc,
         vars_proceso,
         segmentos_validos_previos=None,
+        segmentos_descartados_previos=None,
         min_dias=5
 ):
+
     nuevos_segmentos = []
+
+    if not segmentos_validos_previos:
+        return []
 
     for ref in segmentos_ref:
 
-        fi = ref["fecha_ini"]
-        ff = ref["fecha_fin"]
+        fi_ref = pd.to_datetime(ref["fecha_ini"])
+        ff_ref = pd.to_datetime(ref["fecha_fin"])
 
-        # 🔥 SOLO permitir dentro de zonas previamente válidas
-        if segmentos_validos_previos is not None:
+        # ====================================
+        # 1️⃣ INTERSECCIÓN CON ZONAS VÁLIDAS
+        # ====================================
 
-            solapa = False
+        for seg_prev in segmentos_validos_previos:
 
-            for s in segmentos_validos_previos:
+            fi_prev = pd.to_datetime(seg_prev["fecha_ini"])
+            ff_prev = pd.to_datetime(seg_prev["fecha_fin"])
 
-                if not (ff < s["fecha_ini"] or fi > s["fecha_fin"]):
-                    solapa = True
-                    break
+            fi = max(fi_ref, fi_prev)
+            ff = min(ff_ref, ff_prev)
 
-            if not solapa:
+            if fi >= ff:
                 continue
 
-        sub_df = df_filtrado[
-            (df_filtrado["Sent Time"] >= fi) &
-            (df_filtrado["Sent Time"] <= ff)
-        ]
+            # ====================================
+            # 2️⃣ BLOQUEAR SI SOLAPA CON DESCARTADOS
+            # ====================================
 
-        if sub_df.empty:
-            continue
+            if segmentos_descartados_previos:
 
-        y = sub_df["UT measurement (mm)"].values
-        delta = (ff - fi).days
+                solapa_gris = False
 
-        if delta < min_dias:
-            continue
+                for desc in segmentos_descartados_previos:
 
-        velocidad = (y[-1] - y[0]) / (delta / 365.25)
+                    fi_desc = pd.to_datetime(desc["fecha_ini"])
+                    ff_desc = pd.to_datetime(desc["fecha_fin"])
 
-        medias = {}
-        if df_proc is not None:
-            sub_proc = df_proc[
-                (df_proc["Fecha"] >= fi) &
-                (df_proc["Fecha"] <= ff)
+                    if not (ff <= fi_desc or fi >= ff_desc):
+                        solapa_gris = True
+                        break
+
+                if solapa_gris:
+                    continue
+
+            # ====================================
+            # 3️⃣ CREAR SEGMENTO
+            # ====================================
+
+            sub_df = df_filtrado[
+                (df_filtrado["Sent Time"] >= fi) &
+                (df_filtrado["Sent Time"] <= ff)
             ]
 
-            medias = sub_proc.mean(numeric_only=True)
+            if sub_df.empty:
+                continue
 
-            if medias.empty:
-                medias = df_proc.mean(numeric_only=True)
+            delta = (ff - fi).days
 
-        nuevos_segmentos.append({
-            "ini": sub_df.index.min(),
-            "fin": sub_df.index.max(),
-            "fecha_ini": fi,
-            "fecha_fin": ff,
-            "delta_dias": delta,
-            "velocidad": velocidad,
-            "vel_abs": abs(velocidad),
-            "medias": medias,
-            "estado": "valido"
-        })
+            if delta < min_dias:
+                continue
 
-    return nuevos_segmentos
+            y = sub_df["UT measurement (mm)"].values
+
+            velocidad = (y[-1] - y[0]) / (delta / 365.25)
+
+            medias = {}
+
+            if df_proc is not None:
+                sub_proc = df_proc[
+                    (df_proc["Fecha"] >= fi) &
+                    (df_proc["Fecha"] <= ff)
+                ]
+
+                medias = sub_proc.mean(numeric_only=True)
+
+                if medias.empty:
+                    medias = df_proc.mean(numeric_only=True)
+
+            nuevos_segmentos.append({
+                "ini": sub_df.index.min(),
+                "fin": sub_df.index.max(),
+                "fecha_ini": fi,
+                "fecha_fin": ff,
+                "delta_dias": delta,
+                "velocidad": velocidad,
+                "vel_abs": abs(velocidad),
+                "medias": medias,
+                "estado": "valido"
+            })
+
+    return sorted(nuevos_segmentos, key=lambda x: x["fecha_ini"])
+
 
 
 def make_safe_name(text: str) -> str:
@@ -1986,9 +2019,10 @@ with tabs[0]:
                                     ref,
                                     df_proc,
                                     vars_proceso,
+                                    segmentos_validos_previos=st.session_state["processed_sheets"][key]["segmentos_validos"],
+                                    segmentos_descartados_previos=st.session_state["processed_sheets"][key]["descartados"],
                                     min_dias=min_dias_seg
                                 )
-                        
                                 st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos
                                 st.session_state["processed_sheets"][key]["manually_modified"] = True
                         
