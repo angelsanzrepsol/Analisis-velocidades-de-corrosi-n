@@ -1865,6 +1865,7 @@ with tabs[0]:
                                     offset,
                                     min_dias=min_dias_seg
                                 )
+                                nuevos = sorted(nuevos, key=lambda x: x["fecha_ini"])
                         
                                 # Guardar historial para deshacer
                                 if "historial_segmentos" not in data:
@@ -1875,6 +1876,13 @@ with tabs[0]:
                                 )
                         
                                 data["segmentos_validos"] = nuevos
+
+                                # 🔥 FORZAR ACTUALIZACIÓN GRÁFICA
+                                st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos
+                                st.session_state["processed_sheets"][key]["manually_modified"] = True
+                                
+                                st.rerun()
+
                                 data["manually_modified"] = True
                         
                                 st.success("División global aplicada")
