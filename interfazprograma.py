@@ -1837,49 +1837,47 @@ with tabs[0]:
                         df_filtrado, y_suave, segmentos_raw, df_proc, vars_proceso, min_dias_seg
                     )
                     key = f"proc|{uploaded_corr.name}|{hoja_sel}"
+                    # =========================
+                    # DIVISIÓN GLOBAL
+                    # =========================
+                    
+                    if btn_dividir_global and key in st.session_state["processed_sheets"]:
+                    
+                        data = st.session_state["processed_sheets"][key]
+                    
+                        if tipo_intervalo_global == "Días":
+                            offset = pd.DateOffset(days=valor_intervalo_global)
+                        elif tipo_intervalo_global == "Meses":
+                            offset = pd.DateOffset(months=valor_intervalo_global)
+                        else:
+                            offset = pd.DateOffset(years=valor_intervalo_global)
+                    
+                        nuevos = dividir_todos_segmentos(
+                            data["df_filtrado"],
+                            data["segmentos_validos"],
+                            df_proc,
+                            vars_proceso,
+                            offset,
+                            min_dias=min_dias_seg
+                        )
+                    
+                        nuevos = sorted(nuevos, key=lambda x: x["fecha_ini"])
+                    
+                        # historial
+                        if "historial_segmentos" not in data:
+                            data["historial_segmentos"] = []
+                    
+                        data["historial_segmentos"].append(
+                            data["segmentos_validos"].copy()
+                        )
+                    
+                        st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos
+                        st.session_state["processed_sheets"][key]["manually_modified"] = True
+                    
+                        st.success("División global aplicada")
+                        st.rerun()
 
                     if key not in st.session_state["processed_sheets"]:
-                        # =========================
-                        # DIVISIÓN GLOBAL
-                        # =========================
-                        
-                        if btn_dividir_global:
-
-                            if key in st.session_state["processed_sheets"]:
-                        
-                                data = st.session_state["processed_sheets"][key]
-                        
-                                if tipo_intervalo_global == "Días":
-                                    offset = pd.DateOffset(days=valor_intervalo_global)
-                                elif tipo_intervalo_global == "Meses":
-                                    offset = pd.DateOffset(months=valor_intervalo_global)
-                                else:
-                                    offset = pd.DateOffset(years=valor_intervalo_global)
-                        
-                                nuevos = dividir_todos_segmentos(
-                                    data["df_filtrado"],
-                                    data["segmentos_validos"],
-                                    df_proc,
-                                    vars_proceso,
-                                    offset,
-                                    min_dias=min_dias_seg
-                                )
-                        
-                                nuevos = sorted(nuevos, key=lambda x: x["fecha_ini"])
-                        
-                                # Guardar historial
-                                if "historial_segmentos" not in data:
-                                    data["historial_segmentos"] = []
-                        
-                                data["historial_segmentos"].append(
-                                    data["segmentos_validos"].copy()
-                                )
-                        
-                                st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos
-                                st.session_state["processed_sheets"][key]["manually_modified"] = True
-                        
-                                st.success("División global aplicada")
-                                st.rerun()
 
                         st.session_state["processed_sheets"][key] = {
                             "df_original": df_original,
