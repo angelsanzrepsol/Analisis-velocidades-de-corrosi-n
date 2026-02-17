@@ -2478,14 +2478,15 @@ with tabs[2]:
 
     
         if not df_importancia.empty:
-    
+
             st.dataframe(df_importancia)
-    
-            var_top = df_importancia.iloc[0]["Variable"]
-    
+        
+            var_top = df_importancia.iloc[0]["Variable proceso"]
+        
             st.success(
-                f"La variable que más incrementa la velocidad de corrosión es: **{var_top}**"
+                f"La variable de proceso más relacionada con la velocidad de corrosión es: **{var_top}**"
             )
+
     
         else:
             st.info("No hay suficientes datos para análisis multivariable.")
