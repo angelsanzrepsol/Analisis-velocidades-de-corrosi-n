@@ -149,54 +149,42 @@ def color_calidad(val):
         "Baja": "background-color: #F44336"
     }
     return colores.get(val, "")
-def analizar_importancia_proceso(df):
+def analizar_importancia_proceso(df, vars_proceso):
 
     if df.empty or "Velocidad_corr" not in df.columns:
         return pd.DataFrame()
 
-    df = df.copy()
+    resultados = []
 
-    # Solo columnas numéricas
-    df = df.select_dtypes(include=[np.number])
+    for var in vars_proceso:
 
-    if "Velocidad_corr" not in df.columns:
+        if var not in df.columns:
+            continue
+
+        sub = df[[var, "Velocidad_corr"]].dropna()
+
+        if len(sub) < 3:
+            continue
+
+        x = sub[var]
+        y = sub["Velocidad_corr"]
+
+        if x.std() == 0:
+            continue
+
+        corr = np.corrcoef(x, y)[0,1]
+
+        resultados.append({
+            "Variable proceso": var,
+            "Correlación con corrosión": corr,
+            "Valor absoluto": abs(corr)
+        })
+
+    if not resultados:
         return pd.DataFrame()
 
-    df = df.replace([np.inf, -np.inf], np.nan).dropna()
-
-    if len(df) < 3:
-        return pd.DataFrame()
-
-    y = df["Velocidad_corr"].values
-
-    X = df.drop(columns=["Velocidad_corr"], errors="ignore")
-
-    # 🔥 Eliminar columnas constantes
-    X = X.loc[:, X.std() > 0]
-
-    if X.empty:
-        return pd.DataFrame()
-
-    # 🔥 Si hay más variables que muestras → reducir
-    if X.shape[1] >= X.shape[0]:
-        return pd.DataFrame()
-
-    # Normalizar
-    Xn = (X - X.mean()) / X.std()
-
-    try:
-        coef, *_ = np.linalg.lstsq(Xn.values, y, rcond=None)
-    except:
-        return pd.DataFrame()
-
-    importancia = pd.DataFrame({
-        "Variable": X.columns,
-        "Coeficiente": coef,
-        "Importancia (abs)": np.abs(coef)
-    })
-
-    return importancia.sort_values(
-        "Importancia (abs)",
+    return pd.DataFrame(resultados).sort_values(
+        "Valor absoluto",
         ascending=False
     )
 
@@ -628,9 +616,9 @@ def analizar_crudos_agresividad(df_master):
 
     for crudo in df_master["Crudo"].unique():
 
-        sub = df_master[df_master["Crudo"] == crudo]
+        sub = df_master[df_master["Crudo"] == crudo].dropna()
 
-        if len(sub) < 2:
+        if len(sub) < 3:
             continue
 
         x = sub["Porcentaje_promedio"]
@@ -641,21 +629,25 @@ def analizar_crudos_agresividad(df_master):
 
         corr = np.corrcoef(x, y)[0,1]
 
+        # 🔥 Velocidad media ponderada por porcentaje
+        vel_pond = np.average(y, weights=x)
+
         resultados.append({
             "Crudo": crudo,
             "Correlación % vs corrosión": corr,
-            "Velocidad media asociada": y.mean()
+            "% medio en segmentos": x.mean(),
+            "Velocidad media simple": y.mean(),
+            "Velocidad media ponderada": vel_pond,
+            "Score agresividad": abs(corr) * vel_pond
         })
 
-    df_rank = pd.DataFrame(resultados)
+    if not resultados:
+        return pd.DataFrame()
 
-    if not df_rank.empty:
-        df_rank = df_rank.sort_values(
-            "Correlación % vs corrosión",
-            ascending=False
-        )
-
-    return df_rank
+    return pd.DataFrame(resultados).sort_values(
+        "Score agresividad",
+        ascending=False
+    )
 
 def cargar_proceso_primera_hoja_limpio(path_excel):
 
@@ -801,34 +793,46 @@ def dividir_segmento_por_intervalo(
         })
 
     return nuevos_segmentos
-def analizar_variables_en_crudo(df_master, crudo_objetivo):
+def analizar_variables_en_crudo(df_master, crudo_objetivo, vars_proceso):
 
     sub = df_master[df_master["Crudo"] == crudo_objetivo]
 
     if sub.empty:
         return pd.DataFrame()
 
-    y = sub["Velocidad_corr"]
+    resultados = []
 
-    X = sub.select_dtypes(include=[np.number]).drop(
-        columns=["Velocidad_corr", "Porcentaje_promedio"],
-        errors="ignore"
-    )
+    for var in vars_proceso:
 
-    if X.empty:
+        if var not in sub.columns:
+            continue
+
+        sub2 = sub[[var, "Velocidad_corr"]].dropna()
+
+        if len(sub2) < 3:
+            continue
+
+        x = sub2[var]
+        y = sub2["Velocidad_corr"]
+
+        if x.std() == 0:
+            continue
+
+        corr = np.corrcoef(x, y)[0,1]
+
+        resultados.append({
+            "Variable proceso": var,
+            "Correlación con corrosión": corr,
+            "Valor absoluto": abs(corr)
+        })
+
+    if not resultados:
         return pd.DataFrame()
 
-    Xn = (X - X.mean()) / X.std()
-
-    coef, *_ = np.linalg.lstsq(Xn.values, y, rcond=None)
-
-    df_imp = pd.DataFrame({
-        "Variable": X.columns,
-        "Coeficiente": coef,
-        "Importancia (abs)": np.abs(coef)
-    })
-
-    return df_imp.sort_values("Importancia (abs)", ascending=False)
+    return pd.DataFrame(resultados).sort_values(
+        "Valor absoluto",
+        ascending=False
+    )
 
 def aplicar_segmentacion_referencia(
         df_filtrado,
@@ -2467,7 +2471,11 @@ with tabs[2]:
         if "Media velocidades" in df_vars.columns:
             df_vars["Velocidad_corr"] = df_vars["Media velocidades"]
     
-        df_importancia = analizar_importancia_proceso(df_vars)
+        df_importancia = analizar_importancia_proceso(
+            df_vars,
+            st.session_state.get("vars_proceso", [])
+        )
+
     
         if not df_importancia.empty:
     
@@ -2989,8 +2997,10 @@ with tabs[3]:
         
             df_imp_crudo = analizar_variables_en_crudo(
                 df_master,
-                crudo_top
+                crudo_top,
+                st.session_state.get("vars_proceso", [])
             )
+
         
             if not df_imp_crudo.empty:
         
