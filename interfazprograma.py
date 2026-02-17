@@ -3007,7 +3007,7 @@ with tabs[3]:
         
                 st.dataframe(df_imp_crudo)
         
-                var_top = df_imp_crudo.iloc[0]["Variable"]
+                var_top = df_imp_crudo.iloc[0]["Variable proceso"]
         
                 st.success(
                     f"La variable más relacionada con el aumento de corrosión en {crudo_top} es: **{var_top}**"
