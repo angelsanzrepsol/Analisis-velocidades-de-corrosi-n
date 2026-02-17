@@ -1,18 +1,4 @@
 
-# streamlit_app_final.py (renamed fixed for usuario: interfazprograma_fixed.py)
-"""
-Streamlit — Analizador de corrosión (versión final corregida)
-
-Instrucciones:
-    streamlit run interfazprograma_fixed.py
-
-Este archivo es una versión limpiada y funcional del script que subiste:
-- Elimina bloques duplicados que causaban NameError en corr_path
-- Añade manejo robusto de archivos subidos y procesos temporales
-- Usa fallbacks si no hay funciones del usuario
-- Mantiene la UI y funcionalidades principales
-"""
-
 from pathlib import Path
 import sys
 import importlib.util
@@ -163,6 +149,38 @@ def color_calidad(val):
         "Baja": "background-color: #F44336"
     }
     return colores.get(val, "")
+def analizar_importancia_proceso(df):
+
+    if df.empty or "Velocidad_corr" not in df.columns:
+        return pd.DataFrame()
+
+    df = df.dropna()
+
+    y = df["Velocidad_corr"].values
+
+    X = df.select_dtypes(include=[np.number]).drop(
+        columns=["Velocidad_corr"],
+        errors="ignore"
+    )
+
+    if X.empty:
+        return pd.DataFrame()
+
+    # Normalización
+    Xn = (X - X.mean()) / X.std()
+
+    coef, *_ = np.linalg.lstsq(Xn.values, y, rcond=None)
+
+    importancia = pd.DataFrame({
+        "Variable": X.columns,
+        "Coeficiente": coef,
+        "Importancia (abs)": np.abs(coef)
+    })
+
+    return importancia.sort_values(
+        "Importancia (abs)",
+        ascending=False
+    )
 
 def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
 
@@ -583,6 +601,43 @@ def construir_dataset_crudos_segmentos(detalle_crudos, processed_sheets):
         return pd.DataFrame(filas)
 
     return pd.DataFrame()
+def analizar_crudos_agresividad(df_master):
+
+    if df_master.empty:
+        return pd.DataFrame()
+
+    resultados = []
+
+    for crudo in df_master["Crudo"].unique():
+
+        sub = df_master[df_master["Crudo"] == crudo]
+
+        if len(sub) < 2:
+            continue
+
+        x = sub["Porcentaje_promedio"]
+        y = sub["Velocidad_corr"]
+
+        if x.std() == 0:
+            continue
+
+        corr = np.corrcoef(x, y)[0,1]
+
+        resultados.append({
+            "Crudo": crudo,
+            "Correlación % vs corrosión": corr,
+            "Velocidad media asociada": y.mean()
+        })
+
+    df_rank = pd.DataFrame(resultados)
+
+    if not df_rank.empty:
+        df_rank = df_rank.sort_values(
+            "Correlación % vs corrosión",
+            ascending=False
+        )
+
+    return df_rank
 
 def cargar_proceso_primera_hoja_limpio(path_excel):
 
@@ -728,6 +783,34 @@ def dividir_segmento_por_intervalo(
         })
 
     return nuevos_segmentos
+def analizar_variables_en_crudo(df_master, crudo_objetivo):
+
+    sub = df_master[df_master["Crudo"] == crudo_objetivo]
+
+    if sub.empty:
+        return pd.DataFrame()
+
+    y = sub["Velocidad_corr"]
+
+    X = sub.select_dtypes(include=[np.number]).drop(
+        columns=["Velocidad_corr", "Porcentaje_promedio"],
+        errors="ignore"
+    )
+
+    if X.empty:
+        return pd.DataFrame()
+
+    Xn = (X - X.mean()) / X.std()
+
+    coef, *_ = np.linalg.lstsq(Xn.values, y, rcond=None)
+
+    df_imp = pd.DataFrame({
+        "Variable": X.columns,
+        "Coeficiente": coef,
+        "Importancia (abs)": np.abs(coef)
+    })
+
+    return df_imp.sort_values("Importancia (abs)", ascending=False)
 
 def aplicar_segmentacion_referencia(
         df_filtrado,
@@ -2352,7 +2435,35 @@ with tabs[2]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-   
+    # ======================================
+    # ANALISIS IMPORTANCIA VARIABLES PROCESO
+    # ======================================
+    
+    st.markdown("## 📊 Análisis matemático — Variables que más influyen en la corrosión")
+    
+    df_vars = df_comp.copy()
+    
+    if not df_vars.empty:
+    
+        # renombrar media velocidad como variable objetivo
+        if "Media velocidades" in df_vars.columns:
+            df_vars["Velocidad_corr"] = df_vars["Media velocidades"]
+    
+        df_importancia = analizar_importancia_proceso(df_vars)
+    
+        if not df_importancia.empty:
+    
+            st.dataframe(df_importancia)
+    
+            var_top = df_importancia.iloc[0]["Variable"]
+    
+            st.success(
+                f"La variable que más incrementa la velocidad de corrosión es: **{var_top}**"
+            )
+    
+        else:
+            st.info("No hay suficientes datos para análisis multivariable.")
+
 
     if df_comp.empty:
         st.info("No hay sondas guardadas aún.")
@@ -2825,9 +2936,57 @@ with tabs[3]:
         # =============================
     
         st.subheader("Crudos y variables por segmento")
-    
+        # ======================================
+        # ANALISIS GLOBAL DE CRUDOS
+        # ======================================
+        
+        st.markdown("## 📊 Ranking de crudos más asociados a corrosión")
+        
+        df_rank = analizar_crudos_agresividad(df_master)
+        
+        if not df_rank.empty:
+        
+            st.dataframe(df_rank)
+        
+            crudo_top = df_rank.iloc[0]["Crudo"]
+        
+            st.success(
+                f"El crudo más asociado a altas velocidades de corrosión es: **{crudo_top}**"
+            )
+        
+        else:
+            st.info("No hay suficientes datos para análisis de correlación.")
+
         st.dataframe(df_master)
-    
+        
+        # ======================================
+        # VARIABLES QUE EXPLICAN LA AGRESIVIDAD
+        # ======================================
+        
+        if not df_rank.empty:
+        
+            crudo_top = df_rank.iloc[0]["Crudo"]
+        
+            st.markdown(f"## 🔬 Variables que explican la agresividad de {crudo_top}")
+        
+            df_imp_crudo = analizar_variables_en_crudo(
+                df_master,
+                crudo_top
+            )
+        
+            if not df_imp_crudo.empty:
+        
+                st.dataframe(df_imp_crudo)
+        
+                var_top = df_imp_crudo.iloc[0]["Variable"]
+        
+                st.success(
+                    f"La variable más relacionada con el aumento de corrosión en {crudo_top} es: **{var_top}**"
+                )
+        
+            else:
+                st.info("No hay suficientes variables numéricas para análisis.")
+
         # =============================
         # BLOQUE 2 — BUSCADOR POR CRUDOS
         # =============================
