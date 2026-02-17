@@ -154,22 +154,40 @@ def analizar_importancia_proceso(df):
     if df.empty or "Velocidad_corr" not in df.columns:
         return pd.DataFrame()
 
-    df = df.dropna()
+    df = df.copy()
+
+    # Solo columnas numéricas
+    df = df.select_dtypes(include=[np.number])
+
+    if "Velocidad_corr" not in df.columns:
+        return pd.DataFrame()
+
+    df = df.replace([np.inf, -np.inf], np.nan).dropna()
+
+    if len(df) < 3:
+        return pd.DataFrame()
 
     y = df["Velocidad_corr"].values
 
-    X = df.select_dtypes(include=[np.number]).drop(
-        columns=["Velocidad_corr"],
-        errors="ignore"
-    )
+    X = df.drop(columns=["Velocidad_corr"], errors="ignore")
+
+    # 🔥 Eliminar columnas constantes
+    X = X.loc[:, X.std() > 0]
 
     if X.empty:
         return pd.DataFrame()
 
-    # Normalización
+    # 🔥 Si hay más variables que muestras → reducir
+    if X.shape[1] >= X.shape[0]:
+        return pd.DataFrame()
+
+    # Normalizar
     Xn = (X - X.mean()) / X.std()
 
-    coef, *_ = np.linalg.lstsq(Xn.values, y, rcond=None)
+    try:
+        coef, *_ = np.linalg.lstsq(Xn.values, y, rcond=None)
+    except:
+        return pd.DataFrame()
 
     importancia = pd.DataFrame({
         "Variable": X.columns,
