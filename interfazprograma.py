@@ -879,12 +879,17 @@ def aplicar_segmentacion_referencia(
 
                 for desc in segmentos_descartados_previos:
 
+                    # 🔒 Si no tiene fechas, saltarlo
+                    if "fecha_ini" not in desc or "fecha_fin" not in desc:
+                        continue
+                
                     fi_desc = pd.to_datetime(desc["fecha_ini"])
                     ff_desc = pd.to_datetime(desc["fecha_fin"])
-
+                
                     if not (ff <= fi_desc or fi >= ff_desc):
                         solapa_gris = True
                         break
+
 
                 if solapa_gris:
                     continue
