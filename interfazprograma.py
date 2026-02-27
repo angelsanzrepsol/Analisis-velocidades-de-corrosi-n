@@ -1508,7 +1508,6 @@ def construir_tabla_corregida(processed_sheets, df_mpa, material):
         for i, seg in enumerate(data["segmentos_validos"], start=1):
 
             vel_exp = seg.get("vel_abs")
-
             medias = seg.get("medias")
 
             vel_teo = None
@@ -1528,19 +1527,39 @@ def construir_tabla_corregida(processed_sheets, df_mpa, material):
                 )
 
             error_pct = None
+            desviacion = None
+            posicion = None
 
             if vel_teo and vel_teo != 0 and vel_exp is not None:
-                error_pct = abs((vel_exp - vel_teo) / vel_teo) * 100
 
-            filas.append({
+                desviacion = vel_exp - vel_teo
+                error_pct = abs(desviacion / vel_teo) * 100
+
+                if desviacion > 0:
+                    posicion = "Por encima del teórico"
+                elif desviacion < 0:
+                    posicion = "Por debajo del teórico"
+                else:
+                    posicion = "Igual al teórico"
+
+            fila = {
                 "Sonda": nombre,
                 "Segmento": i,
                 "Fecha inicio": seg.get("fecha_ini"),
                 "Fecha fin": seg.get("fecha_fin"),
                 "Velocidad experimental": vel_exp,
                 "Velocidad teórica": vel_teo,
-                "Error (%)": error_pct
-            })
+                "Error (%)": error_pct,
+                "Desviación (mm/año)": desviacion,
+                "Posición respecto teórico": posicion
+            }
+
+            # Añadir variables de proceso
+            if isinstance(medias, (dict, pd.Series)):
+                for k, v in dict(medias).items():
+                    fila[k] = v
+
+            filas.append(fila)
 
     return pd.DataFrame(filas)
 def buscar_velocidad_mpa(df_mpa, temp, tan, material):
@@ -2998,7 +3017,7 @@ if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
     
 with tabs[3]:
 
-    st.header("Tabla corregida y control de calidad")
+    st.header("Tabla corregida y control avanzado")
 
     df_corr = construir_tabla_corregida(
         st.session_state.get("processed_sheets", {}),
@@ -3010,26 +3029,54 @@ with tabs[3]:
         st.info("No hay datos suficientes.")
         st.stop()
 
-    # FILTRO POR UMBRAL
-    df_corr_filtrado = df_corr[
+    umbral = st.session_state["umbral_error_segmento"]
+
+    df_validos = df_corr[
         (df_corr["Error (%)"].isna()) |
-        (df_corr["Error (%)"] <= st.session_state["umbral_error_segmento"])
+        (df_corr["Error (%)"] <= umbral)
     ]
 
-    st.subheader("Tabla corregida (filtrada por error)")
-    st.dataframe(df_corr_filtrado)
+    df_descartados = df_corr[
+        df_corr["Error (%)"] > umbral
+    ]
 
     # ===============================
-    # GRÁFICO DINÁMICO
+    # TABLA PRINCIPAL
     # ===============================
 
-    import plotly.express as px
+    st.subheader("Segmentos válidos (filtrados)")
+    st.dataframe(df_validos)
+
+    # ===============================
+    # TABLA DESCARTADOS
+    # ===============================
+
+    st.subheader("Segmentos descartados por error")
+
+    if not df_descartados.empty:
+
+        st.dataframe(df_descartados)
+
+        conteo_encima = (df_descartados["Posición respecto teórico"] == "Por encima del teórico").sum()
+        conteo_debajo = (df_descartados["Posición respecto teórico"] == "Por debajo del teórico").sum()
+
+        st.markdown("### Resumen descartados")
+        st.write(f"Por encima del teórico: {conteo_encima}")
+        st.write(f"Por debajo del teórico: {conteo_debajo}")
+
+    else:
+        st.success("No hay segmentos descartados por error.")
+
+    # ===============================
+    # GRÁFICO DINÁMICO — REGRESIÓN FORZADA AL ORIGEN
+    # ===============================
+
     import plotly.graph_objects as go
-    from sklearn.linear_model import LinearRegression
+    import numpy as np
 
-    st.subheader("Velocidad experimental vs teórica")
+    st.subheader("Experimental vs Teórica (regresión forzada al origen)")
 
-    df_plot = df_corr_filtrado.dropna(
+    df_plot = df_validos.dropna(
         subset=["Velocidad experimental", "Velocidad teórica"]
     )
 
@@ -3045,45 +3092,62 @@ with tabs[3]:
 
         sub = df_plot[df_plot["Sonda"] == sonda]
 
-        x = sub["Velocidad teórica"].values.reshape(-1,1)
+        x = sub["Velocidad teórica"].values
         y = sub["Velocidad experimental"].values
 
-        model = LinearRegression().fit(x,y)
-        y_pred = model.predict(x)
+        # 🔥 REGRESIÓN FORZADA AL ORIGEN
+        k = np.sum(x*y) / np.sum(x*x)
 
-        r2 = model.score(x,y)
+        y_pred = k * x
+
+        # R² forzado al origen
+        ss_res = np.sum((y - y_pred)**2)
+        ss_tot = np.sum(y**2)
+        r2 = 1 - ss_res/ss_tot if ss_tot != 0 else np.nan
+
         r2_por_sonda[sonda] = r2
 
-        # puntos
         fig.add_trace(go.Scatter(
-            x=sub["Velocidad teórica"],
-            y=sub["Velocidad experimental"],
+            x=x,
+            y=y,
             mode="markers",
             name=sonda,
             hovertemplate=
-            "Sonda: "+sonda+
-            "<br>Vel Teórica: %{x:.4f}"+
-            "<br>Vel Experimental: %{y:.4f}<extra></extra>"
+            f"Sonda: {sonda}<br>"+
+            "Vel Teórica: %{x:.4f}<br>"+
+            "Vel Experimental: %{y:.4f}<extra></extra>"
         ))
 
-        # recta regresión
+        # Línea modelo físico
+        x_line = np.linspace(0, max(x)*1.1, 100)
         fig.add_trace(go.Scatter(
-            x=sub["Velocidad teórica"],
-            y=y_pred,
+            x=x_line,
+            y=k*x_line,
             mode="lines",
-            name=f"Regresión {sonda} (R²={r2:.3f})",
-            showlegend=True
+            name=f"{sonda} (k={k:.3f}, R²={r2:.3f})"
         ))
+
+    # Línea ideal y = x
+    max_val = max(df_plot["Velocidad teórica"].max(),
+                  df_plot["Velocidad experimental"].max())
+
+    fig.add_trace(go.Scatter(
+        x=[0, max_val],
+        y=[0, max_val],
+        mode="lines",
+        line=dict(dash="dash"),
+        name="Modelo ideal (y=x)"
+    ))
 
     fig.update_layout(
-        xaxis_title="Velocidad teórica (MPA)",
+        xaxis_title="Velocidad teórica",
         yaxis_title="Velocidad experimental",
-        height=600
+        height=650
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("### R² por sonda")
+    st.markdown("### Coeficientes físicos (pendiente forzada al origen)")
 
     for s, r2 in r2_por_sonda.items():
         st.write(f"**{s}** → R² = {r2:.4f}")
