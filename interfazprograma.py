@@ -1536,11 +1536,11 @@ def construir_tabla_corregida(processed_sheets, df_mpa, material):
                 error_pct = abs(desviacion / vel_teo) * 100
 
                 if desviacion > 0:
-                    posicion = "Por encima del teórico"
+                    posicion = "Subestimación del MPA"
                 elif desviacion < 0:
-                    posicion = "Por debajo del teórico"
+                    posicion = "Sobrestimación del MPA"
                 else:
-                    posicion = "Igual al teórico"
+                    posicion = "Igual al MPA"
 
             fila = {
                 "Sonda": nombre,
@@ -1551,7 +1551,7 @@ def construir_tabla_corregida(processed_sheets, df_mpa, material):
                 "Velocidad teórica": vel_teo,
                 "Error (%)": error_pct,
                 "Desviación (mm/año)": desviacion,
-                "Posición respecto teórico": posicion
+                "Estimación del MPA": posicion
             }
 
             # Añadir variables de proceso
@@ -1751,7 +1751,33 @@ def dibujar_grafica_completa_wrapper(df_filtrado, y_suave, segmentos_validos, de
         except Exception:
             pass
     return dibujar_grafica_completa_fallback(df_filtrado, y_suave, segmentos_validos, descartados, segmentos_eliminados_idx, titulo=titulo, figsize=figsize, show=show)
+def mapear_crudos_a_segmentos(df_master):
 
+    if df_master is None or df_master.empty:
+        return {}
+
+    mapa = {}
+
+    for _, row in df_master.iterrows():
+
+        key = (
+            row["Sonda"],
+            row["Hoja"],
+            row["Segmento"]
+        )
+
+        texto = f"{row['Crudo']} ({row['Porcentaje_promedio']:.1f}%)"
+
+        if key not in mapa:
+            mapa[key] = []
+
+        mapa[key].append(texto)
+
+    # convertir listas a string
+    for k in mapa:
+        mapa[k] = " | ".join(mapa[k])
+
+    return mapa
 def recalcular_segmento_local_wrapper(df_filtrado, y_suave, segmento, df_proc, vars_proceso, nuevo_umbral, nuevo_umbral_factor=None, min_dias=10):
     fn = safe_get("recalcular_segmento_local")
     if fn is not None:
@@ -1760,7 +1786,28 @@ def recalcular_segmento_local_wrapper(df_filtrado, y_suave, segmento, df_proc, v
         except Exception:
             pass
     return recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso, nuevo_umbral, nuevo_umbral_factor, min_dias)
+def crear_mapa_estado_segmentos(df_corr, umbral):
 
+    mapa_estado = {}
+
+    for _, row in df_corr.iterrows():
+
+        key = (
+            row["Sonda"],
+            row["Segmento"]
+        )
+
+        if row["Error (%)"] is not None and row["Error (%)"] > umbral:
+            estado = "DESCARTADO"
+        else:
+            estado = "VÁLIDO"
+
+        mapa_estado[key] = {
+            "Estado": estado,
+            "Estimación MPA": row.get("Estimación del MPA")
+        }
+
+    return mapa_estado
 def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso,
                                        nuevo_umbral, nuevo_umbral_factor=None, min_dias=10,
                                        wl_max=51, wl_min=5):
@@ -3039,7 +3086,34 @@ with tabs[3]:
     df_descartados = df_corr[
         df_corr["Error (%)"] > umbral
     ]
-
+    # ===============================
+    # AÑADIR CRUDOS A DESCARTADOS
+    # ===============================
+    
+    df_master = None
+    
+    if "df_master_global" in st.session_state:
+        df_master = st.session_state["df_master_global"]
+    
+    if df_master is not None and not df_master.empty:
+    
+        mapa_crudos = mapear_crudos_a_segmentos(df_master)
+    
+        def obtener_crudos(row):
+            sonda_full = row["Sonda"]
+            try:
+                sonda, hoja = sonda_full.split(" | ")
+            except:
+                return None
+    
+            key = (sonda, hoja, row["Segmento"])
+            return mapa_crudos.get(key)
+    
+        df_descartados["Crudos en el segmento"] = df_descartados.apply(
+            obtener_crudos,
+            axis=1
+        )
+        st.session_state["df_master_global"] = df_master
     # ===============================
     # TABLA PRINCIPAL
     # ===============================
@@ -3061,8 +3135,8 @@ with tabs[3]:
         conteo_debajo = (df_descartados["Posición respecto teórico"] == "Por debajo del teórico").sum()
 
         st.markdown("### Resumen descartados")
-        st.write(f"Por encima del teórico: {conteo_encima}")
-        st.write(f"Por debajo del teórico: {conteo_debajo}")
+        st.write(f"Subestimación del MPA: {conteo_encima}")
+        st.write(f"Sobrestimación del MPA: {conteo_debajo}")
 
     else:
         st.success("No hay segmentos descartados por error.")
@@ -3175,7 +3249,39 @@ with tabs[4]:
         if df_master.empty:
             st.warning("No hay coincidencias con segmentos")
             st.stop()
-    
+        # ==========================================
+        # AÑADIR ESTADO DE SEGMENTO DESDE TABLA CORREGIDA
+        # ==========================================
+        
+        df_corr = construir_tabla_corregida(
+            st.session_state.get("processed_sheets", {}),
+            st.session_state.get("df_mpa"),
+            material_sel
+        )
+        
+        mapa_estado = crear_mapa_estado_segmentos(
+            df_corr,
+            st.session_state["umbral_error_segmento"]
+        )
+        
+        def añadir_estado(row):
+        
+            key = (row["Sonda"] + " | " + row["Hoja"], row["Segmento"])
+        
+            info = mapa_estado.get(key)
+        
+            if info:
+                return pd.Series([
+                    info["Estado"],
+                    info["Estimación MPA"]
+                ])
+            else:
+                return pd.Series([None, None])
+        
+        df_master[["Estado segmento", "Estimación MPA"]] = df_master.apply(
+            añadir_estado,
+            axis=1
+        )
         # =============================
         # BLOQUE 1 — ANALISIS SEGMENTOS
         # =============================
