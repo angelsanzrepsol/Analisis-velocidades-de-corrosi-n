@@ -1227,6 +1227,14 @@ umbral = st.sidebar.number_input(
     format="%.6f",
     key="umbral"
 )
+umbral_error_segmento = st.sidebar.slider(
+    "Umbral error segmentos (%)",
+    min_value=0.0,
+    max_value=200.0,
+    value=30.0,
+    step=1.0,
+    key="umbral_error_segmento"
+)
 min_dias_seg = st.sidebar.number_input("Mínimo días por segmento", min_value=1, max_value=3650, value=10, key="min_dias_seg")
 fig_w = st.sidebar.slider("Ancho figura", 6, 20, 14, key="fig_w")
 fig_h = st.sidebar.slider("Alto figura", 4, 16, 10, key="fig_h")
@@ -1486,7 +1494,55 @@ def extraer_segmentos_validos_fallback(df_filtrado, y_suave, segmentos_raw, df_p
         })
 
     return segmentos_validos, descartados
+def construir_tabla_corregida(processed_sheets, df_mpa, material):
 
+    filas = []
+
+    for key, data in processed_sheets.items():
+
+        if not data.get("saved"):
+            continue
+
+        nombre = f"{data['source_name']} | {data['hoja']}"
+
+        for i, seg in enumerate(data["segmentos_validos"], start=1):
+
+            vel_exp = seg.get("vel_abs")
+
+            medias = seg.get("medias")
+
+            vel_teo = None
+
+            if df_mpa is not None and medias is not None:
+
+                md = dict(medias)
+
+                temp = md.get("T")
+                tan = md.get("TAN")
+
+                vel_teo = buscar_velocidad_mas_cercana(
+                    df_mpa,
+                    temp,
+                    tan,
+                    material
+                )
+
+            error_pct = None
+
+            if vel_teo and vel_teo != 0 and vel_exp is not None:
+                error_pct = abs((vel_exp - vel_teo) / vel_teo) * 100
+
+            filas.append({
+                "Sonda": nombre,
+                "Segmento": i,
+                "Fecha inicio": seg.get("fecha_ini"),
+                "Fecha fin": seg.get("fecha_fin"),
+                "Velocidad experimental": vel_exp,
+                "Velocidad teórica": vel_teo,
+                "Error (%)": error_pct
+            })
+
+    return pd.DataFrame(filas)
 def buscar_velocidad_mpa(df_mpa, temp, tan, material):
 
     if df_mpa is None or pd.isna(temp) or pd.isna(tan):
@@ -1826,6 +1882,7 @@ tabs = st.tabs([
     "Procesar hoja",
     "Combinar hojas",
     "Revisión / Guardado",
+    "Tabla corregida",
     "Crudos"
 ])
 
@@ -2938,8 +2995,100 @@ if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
     )
 
     st.success("Exportación completa generada.")
-# -------------------- TAB 4: CRUDOS --------------------
+    
 with tabs[3]:
+
+    st.header("Tabla corregida y control de calidad")
+
+    df_corr = construir_tabla_corregida(
+        st.session_state.get("processed_sheets", {}),
+        st.session_state.get("df_mpa"),
+        material_sel
+    )
+
+    if df_corr.empty:
+        st.info("No hay datos suficientes.")
+        st.stop()
+
+    # FILTRO POR UMBRAL
+    df_corr_filtrado = df_corr[
+        (df_corr["Error (%)"].isna()) |
+        (df_corr["Error (%)"] <= st.session_state["umbral_error_segmento"])
+    ]
+
+    st.subheader("Tabla corregida (filtrada por error)")
+    st.dataframe(df_corr_filtrado)
+
+    # ===============================
+    # GRÁFICO DINÁMICO
+    # ===============================
+
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from sklearn.linear_model import LinearRegression
+
+    st.subheader("Velocidad experimental vs teórica")
+
+    df_plot = df_corr_filtrado.dropna(
+        subset=["Velocidad experimental", "Velocidad teórica"]
+    )
+
+    if df_plot.empty:
+        st.warning("No hay datos para graficar.")
+        st.stop()
+
+    fig = go.Figure()
+
+    r2_por_sonda = {}
+
+    for sonda in df_plot["Sonda"].unique():
+
+        sub = df_plot[df_plot["Sonda"] == sonda]
+
+        x = sub["Velocidad teórica"].values.reshape(-1,1)
+        y = sub["Velocidad experimental"].values
+
+        model = LinearRegression().fit(x,y)
+        y_pred = model.predict(x)
+
+        r2 = model.score(x,y)
+        r2_por_sonda[sonda] = r2
+
+        # puntos
+        fig.add_trace(go.Scatter(
+            x=sub["Velocidad teórica"],
+            y=sub["Velocidad experimental"],
+            mode="markers",
+            name=sonda,
+            hovertemplate=
+            "Sonda: "+sonda+
+            "<br>Vel Teórica: %{x:.4f}"+
+            "<br>Vel Experimental: %{y:.4f}<extra></extra>"
+        ))
+
+        # recta regresión
+        fig.add_trace(go.Scatter(
+            x=sub["Velocidad teórica"],
+            y=y_pred,
+            mode="lines",
+            name=f"Regresión {sonda} (R²={r2:.3f})",
+            showlegend=True
+        ))
+
+    fig.update_layout(
+        xaxis_title="Velocidad teórica (MPA)",
+        yaxis_title="Velocidad experimental",
+        height=600
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("### R² por sonda")
+
+    for s, r2 in r2_por_sonda.items():
+        st.write(f"**{s}** → R² = {r2:.4f}")
+# -------------------- TAB 4: CRUDOS --------------------
+with tabs[4]:
 
     st.header("Análisis avanzado de crudos")
 
