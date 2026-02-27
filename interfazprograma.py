@@ -3149,24 +3149,33 @@ with tabs[3]:
             st.warning("No existe columna de clasificación respecto al teórico.")
 
         # ===============================
-        # RESUMEN DESCARTADOS (ROBUSTO)
+        # CLASIFICACIÓN DEFINITIVA DESCARTADOS
         # ===============================
         
+        if not df_descartados.empty:
+        
+            df_descartados = df_descartados.copy()
+        
+            df_descartados["Desviación"] = (
+                df_descartados["Velocidad experimental"] -
+                df_descartados["Velocidad teórica"]
+            )
+        
+            df_descartados["Posición respecto teórico"] = df_descartados["Desviación"].apply(
+                lambda x:
+                    "Subestimación del MPA" if pd.notnull(x) and x > 0
+                    else "Sobrestimación del MPA" if pd.notnull(x) and x < 0
+                    else None
+            )
+        
+            conteo_encima = (df_descartados["Desviación"] > 0).sum()
+            conteo_debajo = (df_descartados["Desviación"] < 0).sum()
+        
+        else:
+            conteo_encima = 0
+            conteo_debajo = 0
+        
         st.markdown("### Resumen descartados")
-        
-        conteo_encima = 0
-        conteo_debajo = 0
-        
-        if "Posición respecto teórico" in df_descartados.columns:
-        
-            conteo_encima = (
-                df_descartados["Posición respecto teórico"] == "Subestimación del MPA"
-            ).sum()
-        
-            conteo_debajo = (
-                df_descartados["Posición respecto teórico"] == "Sobrestimación del MPA"
-            ).sum()
-        
         st.write(f"Subestimación del MPA: {conteo_encima}")
         st.write(f"Sobrestimación del MPA: {conteo_debajo}")
 
