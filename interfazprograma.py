@@ -3131,8 +3131,22 @@ with tabs[3]:
 
         st.dataframe(df_descartados)
 
-        conteo_encima = (df_descartados["Posición respecto teórico"] == "Por encima del teórico").sum()
-        conteo_debajo = (df_descartados["Posición respecto teórico"] == "Por debajo del teórico").sum()
+        if "Posición respecto teórico" in df_descartados.columns:
+
+            conteo_encima = (
+                df_descartados["Posición respecto teórico"] == "Subestimación del MPA"
+            ).sum()
+        
+            conteo_debajo = (
+                df_descartados["Posición respecto teórico"] == "Sobrestimación del MPA"
+            ).sum()
+        
+            st.markdown("### Resumen descartados")
+            st.write(f"Subestimación del MPA: {conteo_encima}")
+            st.write(f"Sobrestimación del MPA: {conteo_debajo}")
+        
+        else:
+            st.warning("No existe columna de clasificación respecto al teórico.")
 
         st.markdown("### Resumen descartados")
         st.write(f"Subestimación del MPA: {conteo_encima}")
