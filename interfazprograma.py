@@ -3031,6 +3031,25 @@ if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
 with tabs[3]:
 
     st.header("Tabla corregida y control avanzado")
+    st.subheader("Sondas activas para el análisis")
+
+    processed = st.session_state.get("processed_sheets", {})
+    
+    sondas_activas_disponibles = sorted(processed.keys())
+    if "sondas_seleccionadas" not in st.session_state:
+        st.session_state["sondas_seleccionadas"] = sondas_activas_disponibles
+    
+    sondas_seleccionadas = st.multiselect(
+        "Selecciona las sondas a utilizar",
+        sondas_activas_disponibles,
+        default=st.session_state["sondas_seleccionadas"]
+    )
+    
+    st.session_state["sondas_seleccionadas"] = sondas_seleccionadas
+    processed_filtrado = {
+        k: v for k, v in processed.items()
+        if k in sondas_seleccionadas
+    }
     umbral_diag = st.slider(
         "Tolerancia respecto a la diagonal (mm/año)",
         min_value=0.0,
