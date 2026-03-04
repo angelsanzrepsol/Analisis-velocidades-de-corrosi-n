@@ -1741,6 +1741,8 @@ def recalcular_segmento_local_wrapper(df_filtrado, y_suave, segmento, df_proc, v
         except Exception:
             pass
     return recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso, nuevo_umbral, nuevo_umbral_factor, min_dias)
+import numpy as np
+
 def calcular_regresion(x, y):
 
     x = np.array(x)
@@ -1751,8 +1753,9 @@ def calcular_regresion(x, y):
     x = x[mask]
     y = y[mask]
 
+    # Si no hay suficientes puntos
     if len(x) < 2:
-        return None, None
+        return None, None, None
 
     coef = np.polyfit(x, y, 1)
 
@@ -1761,7 +1764,15 @@ def calcular_regresion(x, y):
 
     y_pred = pendiente * x + intercepto
 
-    return x, y_pred
+    ss_res = np.sum((y - y_pred) ** 2)
+    ss_tot = np.sum((y - np.mean(y)) ** 2)
+
+    if ss_tot == 0:
+        r2 = None
+    else:
+        r2 = 1 - (ss_res / ss_tot)
+
+    return x, y_pred, r2
 
 def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso,
                                        nuevo_umbral, nuevo_umbral_factor=None, min_dias=10,
