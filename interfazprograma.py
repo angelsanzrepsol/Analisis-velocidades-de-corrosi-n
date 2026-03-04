@@ -3071,7 +3071,23 @@ with tabs[3]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-
+    # =========================================
+    # FILTRO 1 — CONSISTENCIA ENTRE SONDAS
+    # =========================================
+    
+    umbral_cv = st.slider(
+        "Umbral variación entre sondas (%)",
+        min_value=0.0,
+        max_value=200.0,
+        value=30.0
+    )
+    
+    if "Coef Variación (%)" in df_corr.columns:
+        df_corr = df_corr[
+            (df_corr["Coef Variación (%)"].isna()) |
+            (df_corr["Coef Variación (%)"] <= umbral_cv)
+        ]
+        
     if df_corr.empty:
         st.info("No hay datos suficientes.")
         st.stop()
@@ -3082,7 +3098,23 @@ with tabs[3]:
         (df_corr["Error (%)"].isna()) |
         (df_corr["Error (%)"] <= umbral)
     ]
-
+    # =========================================
+    # CLASIFICACIÓN RESPECTO A LA DIAGONAL
+    # =========================================
+    
+    df_validos = df_validos.copy()
+    
+    df_validos["Desviación"] = (
+        df_validos["Velocidad experimental"]
+        - df_validos["Velocidad teórica"]
+    )
+    
+    df_validos["Posición respecto teórico"] = df_validos["Desviación"].apply(
+        lambda x:
+            "Subestimación del MPA" if pd.notnull(x) and x > 0
+            else "Sobrestimación del MPA" if pd.notnull(x) and x < 0
+            else None
+    )
     df_descartados = df_corr[
         df_corr["Error (%)"] > umbral
     ]
@@ -3200,72 +3232,62 @@ with tabs[3]:
         st.stop()
 
     fig = go.Figure()
-
-    r2_por_sonda = {}
-
-    for sonda in df_plot["Sonda"].unique():
-
-        sub = df_plot[df_plot["Sonda"] == sonda]
-
-        x = sub["Velocidad teórica"].values
-        y = sub["Velocidad experimental"].values
-
-        # 🔥 REGRESIÓN FORZADA AL ORIGEN
-        k = np.sum(x*y) / np.sum(x*x)
-
-        y_pred = k * x
-
-        # R² forzado al origen
-        ss_res = np.sum((y - y_pred)**2)
-        ss_tot = np.sum(y**2)
-        r2 = 1 - ss_res/ss_tot if ss_tot != 0 else np.nan
-
-        r2_por_sonda[sonda] = r2
-
-        fig.add_trace(go.Scatter(
-            x=x,
-            y=y,
-            mode="markers",
-            name=sonda,
-            hovertemplate=
-            f"Sonda: {sonda}<br>"+
-            "Vel Teórica: %{x:.4f}<br>"+
-            "Vel Experimental: %{y:.4f}<extra></extra>"
-        ))
-
-        # Línea modelo físico
-        x_line = np.linspace(0, max(x)*1.1, 100)
-        fig.add_trace(go.Scatter(
-            x=x_line,
-            y=k*x_line,
-            mode="lines",
-            name=f"{sonda} (k={k:.3f}, R²={r2:.3f})"
-        ))
-
-    # Línea ideal y = x
-    max_val = max(df_plot["Velocidad teórica"].max(),
-                  df_plot["Velocidad experimental"].max())
-
     fig.add_trace(go.Scatter(
-        x=[0, max_val],
-        y=[0, max_val],
-        mode="lines",
-        line=dict(dash="dash"),
-        name="Modelo ideal (y=x)"
+    
+        x=df_validos["Velocidad teórica"],
+        y=df_validos["Velocidad experimental"],
+    
+        mode="markers",
+    
+        error_y=dict(
+            type="data",
+            array=df_validos["Desviación estándar"],
+            visible=True
+        ),
+    
+        marker=dict(size=10)
+    
     ))
-
+    
+    max_val = max(
+        df_validos["Velocidad teórica"].max(),
+        df_validos["Velocidad experimental"].max()
+    )
+    
+    # Línea diagonal ideal
+    fig.add_trace(go.Scatter(
+        x=[0,max_val],
+        y=[0,max_val],
+        mode="lines",
+        line=dict(color="red"),
+        name="y = x"
+    ))
+    
+    # Zonas interpretativas
+    
+    fig.add_annotation(
+        x=max_val*0.25,
+        y=max_val*0.8,
+        text="Sobreestimación<br>(predicción conservadora)",
+        showarrow=False
+    )
+    
+    fig.add_annotation(
+        x=max_val*0.75,
+        y=max_val*0.3,
+        text="Subestimación<br>(predicción ambiciosa)",
+        showarrow=False
+    )
+    
     fig.update_layout(
-        xaxis_title="Velocidad teórica",
-        yaxis_title="Velocidad experimental",
+    
+        xaxis_title="Valores medidos",
+        yaxis_title="Valores predicción mapa",
         height=650
     )
-
+    
     st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("### Coeficientes físicos (pendiente forzada al origen)")
-
-    for s, r2 in r2_por_sonda.items():
-        st.write(f"**{s}** → R² = {r2:.4f}")
+    
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
 
