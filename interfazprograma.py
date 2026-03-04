@@ -3034,6 +3034,12 @@ with tabs[3]:
     st.subheader("Sondas activas para el análisis")
 
     processed = st.session_state.get("processed_sheets", {})
+
+    # SOLO sondas guardadas
+    processed = {
+        k: v for k, v in processed.items()
+        if v.get("saved")
+    }
     
     sondas_activas_disponibles = sorted(processed.keys())
     if "sondas_seleccionadas" not in st.session_state:
@@ -3048,7 +3054,7 @@ with tabs[3]:
     st.session_state["sondas_seleccionadas"] = sondas_seleccionadas
     processed_filtrado = {
         k: v for k, v in processed.items()
-        if k in sondas_seleccionadas
+        if k in sondas_seleccionadas and v.get("saved")
     }
     umbral_diag = st.slider(
         "Tolerancia respecto a la diagonal (mm/año)",
