@@ -1494,8 +1494,11 @@ def extraer_segmentos_validos_fallback(df_filtrado, y_suave, segmentos_raw, df_p
         })
 
     return segmentos_validos, descartados
-def construir_tabla_corregida(processed_sheets, df_mpa, material):
-
+def construir_tabla_corregida(processed_sheets, df_mpa, material, sondas_activas):
+    processed_sheets = {
+        k: v for k, v in processed_sheets.items()
+        if k in sondas_activas
+    }
     df_comp = construir_tabla_segmentos_comparativa(
         processed_sheets,
         df_mpa,
@@ -3066,7 +3069,8 @@ with tabs[3]:
     df_corr = construir_tabla_corregida(
         processed_filtrado,
         st.session_state.get("df_mpa"),
-        material_sel
+        material_sel,
+        sondas_seleccionadas
     )
         
     if df_corr.empty:
