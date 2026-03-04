@@ -1741,7 +1741,27 @@ def recalcular_segmento_local_wrapper(df_filtrado, y_suave, segmento, df_proc, v
         except Exception:
             pass
     return recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso, nuevo_umbral, nuevo_umbral_factor, min_dias)
+def calcular_regresion(x, y):
 
+    x = np.array(x)
+    y = np.array(y)
+
+    mask = (~np.isnan(x)) & (~np.isnan(y))
+
+    x = x[mask]
+    y = y[mask]
+
+    if len(x) < 2:
+        return None, None
+
+    coef = np.polyfit(x, y, 1)
+
+    pendiente = coef[0]
+    intercepto = coef[1]
+
+    y_pred = pendiente * x + intercepto
+
+    return x, y_pred
 
 def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso,
                                        nuevo_umbral, nuevo_umbral_factor=None, min_dias=10,
@@ -3156,7 +3176,91 @@ with tabs[3]:
     
     st.subheader("Valores por debajo de la diagonal")
     st.dataframe(df_debajo)
+    st.subheader("Relación con variables de proceso")
+
+    variables_proceso = [
+        c for c in df_validos.columns
+        if c not in [
+            "Velocidad experimental",
+            "Velocidad teórica",
+            "estado_diag",
+            "delta_diag",
+            "Segmento"
+        ]
+    ]
     
+    variable_x = st.selectbox(
+        "Selecciona variable de proceso",
+        variables_proceso
+    )
+    import plotly.graph_objects as go
+
+    df_plot = df_validos.dropna(subset=[variable_x])
+    
+    df_arriba = df_plot[df_plot["estado_diag"] == "ENCIMA"]
+    fig_arriba = go.Figure()
+
+    fig_arriba.add_trace(go.Scatter(
+        x=df_arriba[variable_x],
+        y=df_arriba["Velocidad experimental"],
+        mode="markers",
+        name="Segmentos ENCIMA"
+    ))
+    
+    x_reg, y_reg = calcular_regresion(
+        df_arriba[variable_x],
+        df_arriba["Velocidad experimental"]
+    )
+    
+    if x_reg is not None:
+    
+        fig_arriba.add_trace(go.Scatter(
+            x=x_reg,
+            y=y_reg,
+            mode="lines",
+            name="Regresión"
+        ))
+    
+    fig_arriba.update_layout(
+        title="MPA subestima corrosión",
+        xaxis_title=variable_x,
+        yaxis_title="Velocidad experimental promedio"
+    )
+    
+    st.plotly_chart(fig_arriba, use_container_width=True)
+    
+    df_abajo = df_plot[df_plot["estado_diag"] == "DEBAJO"]
+
+    fig_abajo = go.Figure()
+    
+    fig_abajo.add_trace(go.Scatter(
+        x=df_abajo[variable_x],
+        y=df_abajo["Velocidad experimental"],
+        mode="markers",
+        name="Segmentos DEBAJO"
+    ))
+    
+    x_reg, y_reg = calcular_regresion(
+        df_abajo[variable_x],
+        df_abajo["Velocidad experimental"]
+    )
+    
+    if x_reg is not None:
+    
+        fig_abajo.add_trace(go.Scatter(
+            x=x_reg,
+            y=y_reg,
+            mode="lines",
+            name="Regresión"
+        ))
+    
+    fig_abajo.update_layout(
+        title="MPA sobreestima corrosión",
+        xaxis_title=variable_x,
+        yaxis_title="Velocidad experimental promedio"
+    )
+    
+    st.plotly_chart(fig_abajo, use_container_width=True)
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
 
