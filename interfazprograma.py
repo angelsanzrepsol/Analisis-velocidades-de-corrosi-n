@@ -3241,7 +3241,7 @@ with tabs[3]:
     
         error_y=dict(
             type="data",
-            array=df_validos["Desviación estándar"],
+            array=df_validos["Error (%)"],
             visible=True
         ),
     
