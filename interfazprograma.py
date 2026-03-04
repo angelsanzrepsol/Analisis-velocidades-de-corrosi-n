@@ -3198,39 +3198,6 @@ with tabs[3]:
     import plotly.graph_objects as go
 
     df_plot = df_validos.dropna(subset=[variable_x])
-    
-    df_arriba = df_plot[df_plot["estado_diag"] == "ENCIMA"]
-    fig_arriba = go.Figure()
-
-    fig_arriba.add_trace(go.Scatter(
-        x=df_arriba[variable_x],
-        y=df_arriba["Velocidad experimental"],
-        mode="markers",
-        name="Segmentos ENCIMA"
-    ))
-    
-    x_reg, y_reg = calcular_regresion(
-        df_arriba[variable_x],
-        df_arriba["Velocidad experimental"]
-    )
-    
-    if x_reg is not None:
-    
-        fig_arriba.add_trace(go.Scatter(
-            x=x_reg,
-            y=y_reg,
-            mode="lines",
-            name="Regresión"
-        ))
-    
-    fig_arriba.update_layout(
-        title="MPA subestima corrosión",
-        xaxis_title=variable_x,
-        yaxis_title="Velocidad experimental promedio"
-    )
-    
-    st.plotly_chart(fig_arriba, use_container_width=True)
-    
     df_abajo = df_plot[df_plot["estado_diag"] == "DEBAJO"]
 
     fig_abajo = go.Figure()
@@ -3242,7 +3209,7 @@ with tabs[3]:
         name="Segmentos DEBAJO"
     ))
     
-    x_reg, y_reg = calcular_regresion(
+    x_reg, y_reg, r2 = calcular_regresion(
         df_abajo[variable_x],
         df_abajo["Velocidad experimental"]
     )
@@ -3255,7 +3222,15 @@ with tabs[3]:
             mode="lines",
             name="Regresión"
         ))
-    
+        if r2 is not None:
+            fig_abajo.add_annotation(
+                x=0.05,
+                y=0.95,
+                xref="paper",
+                yref="paper",
+                text=f"R² = {r2:.3f}",
+                showarrow=False
+            )
     fig_abajo.update_layout(
         title="MPA sobreestima corrosión",
         xaxis_title=variable_x,
@@ -3263,6 +3238,46 @@ with tabs[3]:
     )
     
     st.plotly_chart(fig_abajo, use_container_width=True)
+    
+    df_arriba = df_plot[df_plot["estado_diag"] == "ENCIMA"]
+    fig_arriba = go.Figure()
+
+    fig_arriba.add_trace(go.Scatter(
+        x=df_arriba[variable_x],
+        y=df_arriba["Velocidad experimental"],
+        mode="markers",
+        name="Segmentos ENCIMA"
+    ))
+    
+    x_reg, y_reg, r2 = calcular_regresion(
+        df_arriba[variable_x],
+        df_arriba["Velocidad experimental"]
+    )
+    
+    if x_reg is not None:
+    
+        fig_arriba.add_trace(go.Scatter(
+            x=x_reg,
+            y=y_reg,
+            mode="lines",
+            name="Regresión"
+        ))
+        if r2 is not None:
+            fig_arriba.add_annotation(
+                x=0.05,
+                y=0.95,
+                xref="paper",
+                yref="paper",
+                text=f"R² = {r2:.3f}",
+                showarrow=False
+            )
+    fig_arriba.update_layout(
+        title="MPA subestima corrosión",
+        xaxis_title=variable_x,
+        yaxis_title="Velocidad experimental promedio"
+    )
+    
+    st.plotly_chart(fig_arriba, use_container_width=True)
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
 
