@@ -1496,72 +1496,27 @@ def extraer_segmentos_validos_fallback(df_filtrado, y_suave, segmentos_raw, df_p
     return segmentos_validos, descartados
 def construir_tabla_corregida(processed_sheets, df_mpa, material):
 
-    filas = []
+    df_comp = construir_tabla_segmentos_comparativa(
+        processed_sheets,
+        df_mpa,
+        material
+    )
 
-    for key, data in processed_sheets.items():
+    if df_comp.empty:
+        return df_comp
 
-        if not data.get("saved"):
-            continue
+    # aplicar filtro entre sondas
+    umbral_cv = st.session_state.get("umbral_error_segmento", 30)
 
-        nombre = f"{data['source_name']} | {data['hoja']}"
+    df_comp = df_comp[
+        (df_comp["Coef Variación (%)"].isna()) |
+        (df_comp["Coef Variación (%)"] <= umbral_cv)
+    ]
 
-        for i, seg in enumerate(data["segmentos_validos"], start=1):
+    df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
+    df_comp["Velocidad teórica"] = df_comp["Velocidad esperada"]
 
-            vel_exp = seg.get("vel_abs")
-            medias = seg.get("medias")
-
-            vel_teo = None
-
-            if df_mpa is not None and medias is not None:
-
-                md = dict(medias)
-
-                temp = md.get("T")
-                tan = md.get("TAN")
-
-                vel_teo = buscar_velocidad_mas_cercana(
-                    df_mpa,
-                    temp,
-                    tan,
-                    material
-                )
-
-            error_pct = None
-            desviacion = None
-            posicion = None
-
-            if vel_teo and vel_teo != 0 and vel_exp is not None:
-
-                desviacion = vel_exp - vel_teo
-                error_pct = abs(desviacion / vel_teo) * 100
-
-                if desviacion > 0:
-                    posicion = "Subestimación del MPA"
-                elif desviacion < 0:
-                    posicion = "Sobrestimación del MPA"
-                else:
-                    posicion = "Igual al MPA"
-
-            fila = {
-                "Sonda": nombre,
-                "Segmento": i,
-                "Fecha inicio": seg.get("fecha_ini"),
-                "Fecha fin": seg.get("fecha_fin"),
-                "Velocidad experimental": vel_exp,
-                "Velocidad teórica": vel_teo,
-                "Error (%)": error_pct,
-                "Desviación (mm/año)": desviacion,
-                "Estimación del MPA": posicion
-            }
-
-            # Añadir variables de proceso
-            if isinstance(medias, (dict, pd.Series)):
-                for k, v in dict(medias).items():
-                    fila[k] = v
-
-            filas.append(fila)
-
-    return pd.DataFrame(filas)
+    return df_comp
 def buscar_velocidad_mpa(df_mpa, temp, tan, material):
 
     if df_mpa is None or pd.isna(temp) or pd.isna(tan):
@@ -3065,7 +3020,13 @@ if st.button("📦 Exportar TODOS los ajustes (gráficas + excels + collages)"):
 with tabs[3]:
 
     st.header("Tabla corregida y control avanzado")
-
+    umbral_diag = st.slider(
+    "Tolerancia respecto a la diagonal (mm/año)",
+    min_value=0.0,
+    max_value=1.0,
+    value=0.05,
+    step=0.01
+)
     df_corr = construir_tabla_corregida(
         st.session_state.get("processed_sheets", {}),
         st.session_state.get("df_mpa"),
@@ -3083,18 +3044,17 @@ with tabs[3]:
     
     df_validos = df_validos.copy()
     
-    df_validos["Desviación"] = (
+    df_validos["delta_diag"] = (
         df_validos["Velocidad experimental"]
         - df_validos["Velocidad teórica"]
     )
     
-    df_validos["Posición respecto teórico"] = df_validos["Desviación"].apply(
+    df_validos["estado_diag"] = df_validos["delta_diag"].apply(
         lambda x:
-            "Subestimación del MPA" if pd.notnull(x) and x > 0
-            else "Sobrestimación del MPA" if pd.notnull(x) and x < 0
-            else None
+            "ENCIMA" if x > umbral_diag
+            else "DEBAJO" if x < -umbral_diag
+            else "DENTRO"
     )
-    
     # ===============================
     # AÑADIR CRUDOS A DESCARTADOS
     # ===============================
@@ -3156,12 +3116,6 @@ with tabs[3]:
     
         mode="markers",
     
-        error_y=dict(
-            type="data",
-            array=abs(df_validos["Velocidad experimental"] - df_validos["Velocidad teórica"]),
-            visible=True
-        ),
-    
         marker=dict(size=10)
     
     ))
@@ -3175,7 +3129,6 @@ with tabs[3]:
         df_validos["Velocidad experimental"]
         - df_validos["Velocidad teórica"]
     )
-    umbral = st.session_state["umbral_error_segmento"]
     df_validos["estado_diag"] = df_validos["delta_diag"].apply(
         lambda x:
             "ENCIMA" if x > umbral
