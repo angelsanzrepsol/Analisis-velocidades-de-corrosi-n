@@ -3122,16 +3122,6 @@ with tabs[3]:
         df_validos["Velocidad experimental"].max()
     )
     
-    df_validos["delta_diag"] = (
-        df_validos["Velocidad experimental"]
-        - df_validos["Velocidad teórica"]
-    )
-    df_validos["estado_diag"] = df_validos["delta_diag"].apply(
-        lambda x:
-            "ENCIMA" if x > umbral
-            else "DEBAJO" if x < -umbral
-            else "DENTRO"
-    )
     # Línea diagonal ideal
     fig.add_trace(go.Scatter(
         x=[0,max_val],
