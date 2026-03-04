@@ -3041,9 +3041,6 @@ with tabs[3]:
     # =========================================
     # CLASIFICACIÓN RESPECTO A LA DIAGONAL
     # =========================================
-    
-    df_validos = df_validos.copy()
-    
     df_validos["delta_diag"] = (
         df_validos["Velocidad experimental"]
         - df_validos["Velocidad teórica"]
@@ -3142,6 +3139,21 @@ with tabs[3]:
         mode="lines",
         line=dict(color="red"),
         name="y = x"
+    ))
+    fig.add_trace(go.Scatter(
+        x=[0, max_val],
+        y=[0 + umbral_diag, max_val + umbral_diag],
+        mode="lines",
+        line=dict(color="green", dash="dash"),
+        name="Límite superior tolerancia"
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=[0, max_val],
+        y=[0 - umbral_diag, max_val - umbral_diag],
+        mode="lines",
+        line=dict(color="green", dash="dash"),
+        name="Límite inferior tolerancia"
     ))
     df_encima = df_validos[df_validos["estado_diag"]=="ENCIMA"]
     df_debajo = df_validos[df_validos["estado_diag"]=="DEBAJO"]
