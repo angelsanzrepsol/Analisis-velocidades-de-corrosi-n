@@ -1741,28 +1741,8 @@ def recalcular_segmento_local_wrapper(df_filtrado, y_suave, segmento, df_proc, v
         except Exception:
             pass
     return recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso, nuevo_umbral, nuevo_umbral_factor, min_dias)
-def crear_mapa_estado_segmentos(df_corr, umbral):
 
-    mapa_estado = {}
 
-    for _, row in df_corr.iterrows():
-
-        key = (
-            row["Sonda"],
-            row["Segmento"]
-        )
-
-        if row["Error (%)"] is not None and row["Error (%)"] > umbral:
-            estado = "DESCARTADO"
-        else:
-            estado = "VÁLIDO"
-
-        mapa_estado[key] = {
-            "Estado": estado,
-            "Estimación MPA": row.get("Estimación del MPA")
-        }
-
-    return mapa_estado
 def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso,
                                        nuevo_umbral, nuevo_umbral_factor=None, min_dias=10,
                                        wl_max=51, wl_min=5):
@@ -3021,12 +3001,12 @@ with tabs[3]:
 
     st.header("Tabla corregida y control avanzado")
     umbral_diag = st.slider(
-    "Tolerancia respecto a la diagonal (mm/año)",
-    min_value=0.0,
-    max_value=1.0,
-    value=0.05,
-    step=0.01
-)
+        "Tolerancia respecto a la diagonal (mm/año)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.05,
+        step=0.01
+    )
     df_corr = construir_tabla_corregida(
         st.session_state.get("processed_sheets", {}),
         st.session_state.get("df_mpa"),
@@ -3209,30 +3189,6 @@ with tabs[4]:
             st.session_state.get("processed_sheets", {}),
             st.session_state.get("df_mpa"),
             material_sel
-        )
-        
-        mapa_estado = crear_mapa_estado_segmentos(
-            df_corr,
-            st.session_state["umbral_error_segmento"]
-        )
-        
-        def añadir_estado(row):
-        
-            key = (row["Sonda"] + " | " + row["Hoja"], row["Segmento"])
-        
-            info = mapa_estado.get(key)
-        
-            if info:
-                return pd.Series([
-                    info["Estado"],
-                    info["Estimación MPA"]
-                ])
-            else:
-                return pd.Series([None, None])
-        
-        df_master[["Estado segmento", "Estimación MPA"]] = df_master.apply(
-            añadir_estado,
-            axis=1
         )
         # =============================
         # BLOQUE 1 — ANALISIS SEGMENTOS
