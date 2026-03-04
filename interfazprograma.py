@@ -3071,33 +3071,12 @@ with tabs[3]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-    # =========================================
-    # FILTRO 1 — CONSISTENCIA ENTRE SONDAS
-    # =========================================
-    
-    umbral_cv = st.slider(
-        "Umbral variación entre sondas (%)",
-        min_value=0.0,
-        max_value=200.0,
-        value=30.0
-    )
-    
-    if "Coef Variación (%)" in df_corr.columns:
-        df_corr = df_corr[
-            (df_corr["Coef Variación (%)"].isna()) |
-            (df_corr["Coef Variación (%)"] <= umbral_cv)
-        ]
         
     if df_corr.empty:
         st.info("No hay datos suficientes.")
         st.stop()
 
-    umbral = st.session_state["umbral_error_segmento"]
-
-    df_validos = df_corr[
-        (df_corr["Error (%)"].isna()) |
-        (df_corr["Error (%)"] <= umbral)
-    ]
+    df_validos = df_corr.copy()
     # =========================================
     # CLASIFICACIÓN RESPECTO A LA DIAGONAL
     # =========================================
@@ -3115,9 +3094,7 @@ with tabs[3]:
             else "Sobrestimación del MPA" if pd.notnull(x) and x < 0
             else None
     )
-    df_descartados = df_corr[
-        df_corr["Error (%)"] > umbral
-    ]
+    
     # ===============================
     # AÑADIR CRUDOS A DESCARTADOS
     # ===============================
@@ -3140,11 +3117,7 @@ with tabs[3]:
     
             key = (sonda, hoja, row["Segmento"])
             return mapa_crudos.get(key)
-    
-        df_descartados["Crudos en el segmento"] = df_descartados.apply(
-            obtener_crudos,
-            axis=1
-        )
+        
         st.session_state["df_master_global"] = df_master
     # ===============================
     # TABLA PRINCIPAL
@@ -3156,63 +3129,6 @@ with tabs[3]:
     # ===============================
     # TABLA DESCARTADOS
     # ===============================
-
-    st.subheader("Segmentos descartados por error")
-
-    if not df_descartados.empty:
-
-        st.dataframe(df_descartados)
-
-        if "Posición respecto teórico" in df_descartados.columns:
-
-            conteo_encima = (
-                df_descartados["Posición respecto teórico"] == "Subestimación del MPA"
-            ).sum()
-        
-            conteo_debajo = (
-                df_descartados["Posición respecto teórico"] == "Sobrestimación del MPA"
-            ).sum()
-        
-            st.markdown("### Resumen descartados")
-            st.write(f"Subestimación del MPA: {conteo_encima}")
-            st.write(f"Sobrestimación del MPA: {conteo_debajo}")
-        
-        else:
-            st.warning("No existe columna de clasificación respecto al teórico.")
-
-        # ===============================
-        # CLASIFICACIÓN DEFINITIVA DESCARTADOS
-        # ===============================
-        
-        if not df_descartados.empty:
-        
-            df_descartados = df_descartados.copy()
-        
-            df_descartados["Desviación"] = (
-                df_descartados["Velocidad experimental"] -
-                df_descartados["Velocidad teórica"]
-            )
-        
-            df_descartados["Posición respecto teórico"] = df_descartados["Desviación"].apply(
-                lambda x:
-                    "Subestimación del MPA" if pd.notnull(x) and x > 0
-                    else "Sobrestimación del MPA" if pd.notnull(x) and x < 0
-                    else None
-            )
-        
-            conteo_encima = (df_descartados["Desviación"] > 0).sum()
-            conteo_debajo = (df_descartados["Desviación"] < 0).sum()
-        
-        else:
-            conteo_encima = 0
-            conteo_debajo = 0
-        
-        st.markdown("### Resumen descartados")
-        st.write(f"Subestimación del MPA: {conteo_encima}")
-        st.write(f"Sobrestimación del MPA: {conteo_debajo}")
-
-    else:
-        st.success("No hay segmentos descartados por error.")
 
     # ===============================
     # GRÁFICO DINÁMICO — REGRESIÓN FORZADA AL ORIGEN
@@ -3230,18 +3146,19 @@ with tabs[3]:
     if df_plot.empty:
         st.warning("No hay datos para graficar.")
         st.stop()
-
+        
+    
     fig = go.Figure()
     fig.add_trace(go.Scatter(
     
-        x=df_validos["Velocidad teórica"],
-        y=df_validos["Velocidad experimental"],
+        x=df_validos["Velocidad experimental"],
+        y=df_validos["Velocidad teórica"],
     
         mode="markers",
     
         error_y=dict(
             type="data",
-            array=df_validos["Error (%)"],
+            array=abs(df_validos["Velocidad experimental"] - df_validos["Velocidad teórica"]),
             visible=True
         ),
     
@@ -3254,6 +3171,17 @@ with tabs[3]:
         df_validos["Velocidad experimental"].max()
     )
     
+    df_validos["delta_diag"] = (
+        df_validos["Velocidad experimental"]
+        - df_validos["Velocidad teórica"]
+    )
+    umbral = st.session_state["umbral_error_segmento"]
+    df_validos["estado_diag"] = df_validos["delta_diag"].apply(
+        lambda x:
+            "ENCIMA" if x > umbral
+            else "DEBAJO" if x < -umbral
+            else "DENTRO"
+    )
     # Línea diagonal ideal
     fig.add_trace(go.Scatter(
         x=[0,max_val],
@@ -3262,7 +3190,9 @@ with tabs[3]:
         line=dict(color="red"),
         name="y = x"
     ))
-    
+    df_encima = df_validos[df_validos["estado_diag"]=="ENCIMA"]
+    df_debajo = df_validos[df_validos["estado_diag"]=="DEBAJO"]
+    df_dentro = df_validos[df_validos["estado_diag"]=="DENTRO"]
     # Zonas interpretativas
     
     fig.add_annotation(
@@ -3280,13 +3210,19 @@ with tabs[3]:
     )
     
     fig.update_layout(
-    
-        xaxis_title="Valores medidos",
-        yaxis_title="Valores predicción mapa",
-        height=650
-    )
+
+        xaxis_title="Velocidad experimental (mm/año)",
+        yaxis_title="Velocidad teórica MPA (mm/año)",)
     
     st.plotly_chart(fig, use_container_width=True)
+    st.subheader("Segmentos dentro del umbral")
+    st.dataframe(df_dentro)
+    
+    st.subheader("Valores por encima de la diagonal")
+    st.dataframe(df_encima)
+    
+    st.subheader("Valores por debajo de la diagonal")
+    st.dataframe(df_debajo)
     
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
