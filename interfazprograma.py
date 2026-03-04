@@ -3058,7 +3058,7 @@ with tabs[3]:
         step=0.01
     )
     df_corr = construir_tabla_corregida(
-        st.session_state.get("processed_sheets", {}),
+        processed_filtrado,
         st.session_state.get("df_mpa"),
         material_sel
     )
