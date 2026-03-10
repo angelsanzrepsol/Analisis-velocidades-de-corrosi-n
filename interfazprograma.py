@@ -1352,7 +1352,41 @@ def detect_columns_fallback(df):
                 col_espesor = c
                 break
     return col_fecha, col_espesor
+def analizar_importancia_variables(df, vars_proceso):
 
+    resultados = []
+
+    for var in vars_proceso:
+
+        if var not in df.columns:
+            continue
+
+        sub = df[[var, "Velocidad experimental"]].dropna()
+
+        if len(sub) < 3:
+            continue
+
+        x = sub[var]
+        y = sub["Velocidad experimental"]
+
+        if x.std() == 0:
+            continue
+
+        corr = np.corrcoef(x, y)[0,1]
+
+        resultados.append({
+            "Variable proceso": var,
+            "Correlación": corr,
+            "Importancia": abs(corr)
+        })
+
+    if not resultados:
+        return pd.DataFrame()
+
+    return pd.DataFrame(resultados).sort_values(
+        "Importancia",
+        ascending=False
+    )
 def detectar_segmentos_fallback(df_original, umbral_factor=1.02, umbral=0.0005, min_dias=10, wl_max=51, wl_min=5):
     df = df_original.copy()
     try:
@@ -1558,6 +1592,27 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
 
     return fila.get(material)
 
+def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
+
+    segmentos_validos_ids = set(
+        df_comp[
+            (df_comp["Coef Variación (%)"].isna()) |
+            (df_comp["Coef Variación (%)"] <= umbral_cv)
+        ]["Segmento"]
+    )
+
+    for key, data in processed_sheets.items():
+
+        nuevos = []
+
+        for i, seg in enumerate(data["segmentos_validos"], start=1):
+
+            if f"Seg {i}" in segmentos_validos_ids:
+                nuevos.append(seg)
+
+        processed_sheets[key]["segmentos_validos"] = nuevos
+
+    return processed_sheets
 def calcular_perfil_teorico_por_segmentos(df_filtrado, segmentos, df_mpa, material):
 
     if df_mpa is None:
@@ -3072,7 +3127,11 @@ with tabs[3]:
         material_sel,
         sondas_seleccionadas
     )
-        
+    processed_filtrado = aplicar_umbral_error_segmentos(
+        processed_filtrado,
+        df_corr,
+        st.session_state["umbral_error_segmento"]
+    )
     if df_corr.empty:
         st.info("No hay datos suficientes.")
         st.stop()
@@ -3188,6 +3247,54 @@ with tabs[3]:
     df_encima = df_validos[df_validos["estado_diag"]=="ENCIMA"]
     df_debajo = df_validos[df_validos["estado_diag"]=="DEBAJO"]
     df_dentro = df_validos[df_validos["estado_diag"]=="DENTRO"]
+    if "df_master_global" in st.session_state:
+    
+        df_master = st.session_state["df_master_global"]
+    
+        st.subheader("Crudos involucrados")
+    
+        seg_encima = df_encima["Segmento"].unique()
+        seg_debajo = df_debajo["Segmento"].unique()
+    
+        crudos_encima = df_master[df_master["Segmento"].isin(seg_encima)]
+        crudos_debajo = df_master[df_master["Segmento"].isin(seg_debajo)]
+    
+        st.markdown("### Crudos en segmentos ENCIMA")
+        st.dataframe(
+            crudos_encima.groupby("Crudo")["Porcentaje_promedio"]
+            .mean()
+            .sort_values(ascending=False)
+        )
+    
+        st.markdown("### Crudos en segmentos DEBAJO")
+        st.dataframe(
+            crudos_debajo.groupby("Crudo")["Porcentaje_promedio"]
+            .mean()
+            .sort_values(ascending=False)
+        )  
+    st.subheader("Variables que explican desviaciones del modelo")
+
+    vars_proc = st.session_state.get("vars_proceso", [])
+    
+    # ENCIMA
+    st.markdown("### Variables más asociadas a corrosión MAYOR que la teórica")
+    
+    imp_encima = analizar_importancia_variables(df_encima, vars_proc)
+    
+    if not imp_encima.empty:
+        st.dataframe(imp_encima)
+    else:
+        st.info("No hay suficientes datos")
+    
+    # DEBAJO
+    st.markdown("### Variables más asociadas a corrosión MENOR que la teórica")
+    
+    imp_debajo = analizar_importancia_variables(df_debajo, vars_proc)
+    
+    if not imp_debajo.empty:
+        st.dataframe(imp_debajo)
+    else:
+        st.info("No hay suficientes datos")
     # Zonas interpretativas
     
     fig.add_annotation(
