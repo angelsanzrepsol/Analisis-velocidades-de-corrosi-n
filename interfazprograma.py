@@ -1803,34 +1803,48 @@ import numpy as np
 
 def calcular_regresion(x, y):
 
-    x = np.array(x)
-    y = np.array(y)
+    import numpy as np
+    import pandas as pd
 
-    mask = (~np.isnan(x)) & (~np.isnan(y))
+    # Convertir a Series
+    x = pd.Series(x)
+    y = pd.Series(y)
 
-    x = x[mask]
-    y = y[mask]
+    # Forzar numérico
+    x = pd.to_numeric(x, errors="coerce")
+    y = pd.to_numeric(y, errors="coerce")
 
-    # Si no hay suficientes puntos
+    # Quitar NaN
+    mask = (~x.isna()) & (~y.isna())
+
+    x = x[mask].values
+    y = y[mask].values
+
+    # Si no hay suficientes datos
     if len(x) < 2:
         return None, None, None
 
-    coef = np.polyfit(x, y, 1)
+    try:
 
-    pendiente = coef[0]
-    intercepto = coef[1]
+        coef = np.polyfit(x, y, 1)
 
-    y_pred = pendiente * x + intercepto
+        pendiente = coef[0]
+        intercepto = coef[1]
 
-    ss_res = np.sum((y - y_pred) ** 2)
-    ss_tot = np.sum((y - np.mean(y)) ** 2)
+        y_pred = pendiente * x + intercepto
 
-    if ss_tot == 0:
-        r2 = None
-    else:
-        r2 = 1 - (ss_res / ss_tot)
+        ss_res = np.sum((y - y_pred) ** 2)
+        ss_tot = np.sum((y - np.mean(y)) ** 2)
 
-    return x, y_pred, r2
+        if ss_tot == 0:
+            r2 = None
+        else:
+            r2 = 1 - (ss_res / ss_tot)
+
+        return x, y_pred, r2
+
+    except Exception:
+        return None, None, None
 
 def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso,
                                        nuevo_umbral, nuevo_umbral_factor=None, min_dias=10,
