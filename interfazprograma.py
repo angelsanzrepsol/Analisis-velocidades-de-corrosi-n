@@ -1791,7 +1791,46 @@ def detectar_segmentos_wrapper(df, umbral_factor_val, umbral_val):
         except Exception:
             pass
     return detectar_segmentos_fallback(df, umbral_factor_val, umbral_val)
+def graficar_segmentos(df, titulo):
 
+    if df.empty:
+        st.info("No hay segmentos")
+        return
+
+    import plotly.graph_objects as go
+
+    sondas = [c for c in df.columns if c not in ["segmento","promedio","std","CV (%)"]]
+
+    fig = go.Figure()
+
+    for s in sondas:
+        fig.add_trace(
+            go.Scatter(
+                x=df["segmento"],
+                y=df[s],
+                mode="lines+markers",
+                name=s
+            )
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=df["segmento"],
+            y=df["promedio"],
+            mode="lines+markers",
+            name="Promedio segmento",
+            line=dict(color="black", width=5)
+        )
+    )
+
+    fig.update_layout(
+        title=titulo,
+        xaxis_title="Segmento",
+        yaxis_title="Velocidad corrosión",
+        height=500
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 def extraer_segmentos_validos_wrapper(df_filtrado, y_suave, segmentos_raw, df_proc, vars_proceso, min_dias_val):
     fn = safe_get("extraer_segmentos_validos")
     if fn is not None:
@@ -2641,6 +2680,66 @@ with tabs[1]:
                 ff = pd.to_datetime(date_range[1])
                 fig.add_vrect(x0=fi, x1=ff, fillcolor="LightSalmon", opacity=0.3, layer="below", line_width=0)
                 st.plotly_chart(fig, use_container_width=True)
+                # ======================================
+                # CONSTRUIR TABLA DE SEGMENTOS ENTRE SONDAS
+                # ======================================
+                
+                segmentos_rows = []
+                
+                for k in sel:
+                    d = st.session_state['processed_sheets'][k]
+                
+                    for i, s in enumerate(d['segmentos_validos']):
+                        if s.get('estado','valido') != 'valido':
+                            continue
+                
+                        segmentos_rows.append({
+                            "sonda": d['hoja'],
+                            "segmento": i,
+                            "vel": s.get("vel_abs")
+                        })
+                
+                df_seg = pd.DataFrame(segmentos_rows)
+                
+                if not df_seg.empty:
+                
+                    df_comp = df_seg.pivot_table(
+                        index="segmento",
+                        columns="sonda",
+                        values="vel"
+                    ).reset_index()
+                
+                    sondas = [c for c in df_comp.columns if c != "segmento"]
+                
+                    df_comp["promedio"] = df_comp[sondas].mean(axis=1)
+                
+                    df_comp["std"] = df_comp[sondas].std(axis=1)
+                
+                    df_comp["CV (%)"] = df_comp["std"] / df_comp["promedio"] * 100
+                    # ======================================
+                    # FILTRAR SEGÚN UMBRAL EXISTENTE
+                    # ======================================
+                    
+                    df_validos = df_comp[
+                        df_comp["CV (%)"].isna() | (df_comp["CV (%)"] <= umbral_error_segmento)
+                    ]
+                    
+                    df_invalidos = df_comp[
+                        df_comp["CV (%)"] > umbral_error_segmento
+                    ]
+                st.subheader("Segmentos válidos")
+                
+                graficar_segmentos(
+                    df_validos,
+                    f"Segmentos válidos (CV ≤ {umbral_error_segmento}%)"
+                )
+                
+                st.subheader("Segmentos no válidos")
+                
+                graficar_segmentos(
+                    df_invalidos,
+                    f"Segmentos no válidos (CV > {umbral_error_segmento}%)"
+                )
                 if st.button("Extraer segmentos en intervalo seleccionado"):
                     extracted = []
                     for k in sel:
