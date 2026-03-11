@@ -1593,10 +1593,18 @@ def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
         return processed_sheets
 
     # segmentos válidos según CV
-    df_validos = df_comp[
-        (df_comp["Coef Variación (%)"].isna()) |
-        (df_comp["Coef Variación (%)"] <= umbral_cv)
-    ]
+
+    if not df_comp.empty and "Coef Variación (%)" in df_comp.columns:
+    
+        cv = pd.to_numeric(df_comp["Coef Variación (%)"], errors="coerce")
+    
+        df_validos = df_comp[
+            cv.isna() | (cv <= umbral_cv)
+        ].copy()
+    
+    else:
+        # si no existe la columna CV, no filtramos nada
+        df_validos = df_comp.copy()
 
     segmentos_validos = set(
         zip(
