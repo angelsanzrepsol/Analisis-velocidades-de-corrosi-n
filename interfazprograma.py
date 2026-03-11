@@ -3205,10 +3205,19 @@ with tabs[3]:
         st.session_state.get("df_mpa"),
         material_sel
     )
+    
+    # aplicar filtro de error
     processed_filtrado = aplicar_umbral_error_segmentos(
         processed_filtrado,
         df_comp,
         umbral_error_segmento
+    )
+    
+    # 🔥 RECONSTRUIR tabla ya filtrada
+    df_comp = construir_tabla_segmentos_comparativa(
+        processed_filtrado,
+        st.session_state.get("df_mpa"),
+        material_sel
     )
     # =========================================
     # TABLA CORREGIDA FINAL
