@@ -1529,10 +1529,12 @@ def extraer_segmentos_validos_fallback(df_filtrado, y_suave, segmentos_raw, df_p
 
     return segmentos_validos, descartados
 def construir_tabla_corregida(processed_sheets, df_mpa, material, sondas_activas):
+
     processed_sheets = {
         k: v for k, v in processed_sheets.items()
         if k in sondas_activas
     }
+
     df_comp = construir_tabla_segmentos_comparativa(
         processed_sheets,
         df_mpa,
@@ -1542,18 +1544,11 @@ def construir_tabla_corregida(processed_sheets, df_mpa, material, sondas_activas
     if df_comp.empty:
         return df_comp
 
-    # aplicar filtro entre sondas
-    umbral_cv = st.session_state.get("umbral_error_segmento", 30)
-
-    df_comp = df_comp[
-        (df_comp["Coef Variación (%)"].isna()) |
-        (df_comp["Coef Variación (%)"] <= umbral_cv)
-    ]
-
     df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
     df_comp["Velocidad teórica"] = df_comp["Velocidad esperada"]
 
     return df_comp
+
 def buscar_velocidad_mpa(df_mpa, temp, tan, material):
 
     if df_mpa is None or pd.isna(temp) or pd.isna(tan):
@@ -3184,11 +3179,10 @@ with tabs[3]:
     # =========================================
     
     df_comp = construir_tabla_segmentos_comparativa(
-        st.session_state.get("processed_sheets", {}),
+        processed_filtrado,
         st.session_state.get("df_mpa"),
         material_sel
     )
-    
     # =========================================
     # APLICAR UMBRAL DE ERROR ENTRE SONDAS
     # =========================================
