@@ -531,11 +531,19 @@ def asignar_crudos_a_segmentos(detalle_crudos, processed_sheets):
             if sub.empty:
                 continue
 
-            resumen = (
+            suma = (
                 sub.groupby("Especie")["Porcentaje"]
-                .mean()
+                .sum()
                 .reset_index()
             )
+            
+            total = suma["Porcentaje"].sum()
+            
+            suma["Porcentaje"] = (
+                suma["Porcentaje"] / total * 100
+            )
+            
+            resumen = suma
 
             resumen["Segmento"] = i
             resumen["Sonda"] = sonda
