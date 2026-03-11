@@ -584,11 +584,19 @@ def construir_dataset_crudos_segmentos(detalle_crudos, processed_sheets):
             if sub.empty:
                 continue
 
-            resumen = (
+            suma = (
                 sub.groupby("Especie")["Porcentaje"]
-                .mean()
+                .sum()
                 .reset_index()
             )
+            
+            total = suma["Porcentaje"].sum()
+            
+            suma["Porcentaje"] = (
+                suma["Porcentaje"] / total * 100
+            )
+            
+            resumen = suma
 
             medias_proc = seg.get("medias", {})
 
