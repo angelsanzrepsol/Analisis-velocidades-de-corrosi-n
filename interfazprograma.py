@@ -3205,7 +3205,7 @@ with tabs[3]:
         df_master = st.session_state["df_master_global"]
     
         mapa_crudos = (
-            df_master.groupby(["Segmento"])["Crudo"]
+            df_master.groupby("Segmento")["Crudo"]
             .apply(lambda x: ", ".join(sorted(x.unique())))
             .to_dict()
         )
@@ -3550,6 +3550,7 @@ with tabs[4]:
             detalle_crudos,
             st.session_state.get("processed_sheets", {})
         )
+        df_master["Segmento"] = "Seg " + df_master["Segmento"].astype(str)
         st.session_state["df_master_global"] = df_master
         if df_master.empty:
             st.warning("No hay coincidencias con segmentos")
