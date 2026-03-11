@@ -1992,7 +1992,39 @@ def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, 
 # -------------------- Session storage --------------------
 if "processed_sheets" not in st.session_state:
     st.session_state["processed_sheets"] = {}
+    
+# =========================================
+# CREAR DATASET GLOBAL DE CRUDOS
+# =========================================
 
+if uploaded_crudos is not None:
+
+    try:
+
+        hojas_crudos = leer_archivo(uploaded_crudos)
+
+        if hojas_crudos:
+
+            hoja_crudos = list(hojas_crudos.keys())[0]
+
+            df_crudos = hojas_crudos[hoja_crudos]
+
+            detalle_crudos = procesar_crudos(df_crudos)
+
+            df_master = construir_dataset_crudos_segmentos(
+                detalle_crudos,
+                st.session_state.get("processed_sheets", {})
+            )
+
+            if not df_master.empty:
+
+                df_master["Segmento"] = "Seg " + df_master["Segmento"].astype(str)
+
+                st.session_state["df_master_global"] = df_master
+
+    except Exception as e:
+
+        st.warning(f"No se pudo generar dataset de crudos: {e}")
 # -------------------- Pestañas UI --------------------
 tabs = st.tabs([
     "Procesar hoja",
