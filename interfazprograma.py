@@ -3184,21 +3184,24 @@ with tabs[3]:
         material_sel
     )
     
+    # asegurar que CV sea numérico
     df_comp["Coef Variación (%)"] = pd.to_numeric(
         df_comp["Coef Variación (%)"],
         errors="coerce"
     )
     
-    st.write("Segmentos antes:", len(df_comp))
-    
+    # usar directamente el valor del slider
     umbral_cv = umbral_error_segmento
     
-    df_comp = df_comp[
+    # aplicar filtro
+    df_comp_filtrado = df_comp[
         (df_comp["Coef Variación (%)"].isna()) |
         (df_comp["Coef Variación (%)"] <= umbral_cv)
-    ]
+    ].copy()
     
-    st.write("Segmentos después:", len(df_comp))
+    # para comprobar que funciona
+    st.write("Segmentos totales:", len(df_comp))
+    st.write("Segmentos tras aplicar umbral:", len(df_comp_filtrado))
     # =========================================
     # APLICAR UMBRAL DE ERROR ENTRE SONDAS
     # =========================================
@@ -3207,7 +3210,7 @@ with tabs[3]:
     # TABLA CORREGIDA FINAL
     # =========================================
     
-    df_corr = df_comp.copy()
+    df_corr = df_comp_filtrado.copy()
 
     df_corr["Velocidad experimental"] = df_corr["Media velocidades"]
     df_corr["Velocidad teórica"] = df_corr["Velocidad esperada"]
