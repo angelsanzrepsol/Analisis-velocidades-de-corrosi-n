@@ -3522,12 +3522,12 @@ with tabs[3]:
             .mean()
             .sort_values(ascending=False)
         )  
-    st.subheader("Variables que explican desviaciones del modelo")
+    st.subheader("Impacto de los parámetros del crudo sobre las velocidades experimentales")
 
     vars_proc = st.session_state.get("vars_proceso", [])
     
     # ENCIMA
-    st.markdown("### Variables más asociadas a corrosión MAYOR que la teórica")
+    st.markdown("### Velocidades medidas subestimadas")
     
     imp_encima = analizar_importancia_variables(df_encima, vars_proc)
     
@@ -3537,7 +3537,7 @@ with tabs[3]:
         st.info("No hay suficientes datos")
     
     # DEBAJO
-    st.markdown("### Variables más asociadas a corrosión MENOR que la teórica")
+    st.markdown("### Velocidades medidas sobreestimadas")
     
     imp_debajo = analizar_importancia_variables(df_debajo, vars_proc)
     
@@ -3570,10 +3570,10 @@ with tabs[3]:
     st.subheader("Segmentos dentro del umbral")
     st.dataframe(df_dentro)
     
-    st.subheader("Valores por encima de la diagonal")
+    st.subheader("Valores por debajo de la diagonal")
     st.dataframe(df_encima)
     
-    st.subheader("Valores por debajo de la diagonal")
+    st.subheader("Valores por encima de la diagonal")
     st.dataframe(df_debajo)
     st.subheader("Relación con variables de proceso")
     # =========================================
@@ -3597,7 +3597,7 @@ with tabs[3]:
         col1, col2, col3 = st.columns(3)
     
         with col1:
-            st.markdown("### Crudos en segmentos ENCIMA")
+            st.markdown("### Crudos en segmentos Subestimados ")
         
             if not crudos_encima.empty:
         
@@ -3616,7 +3616,7 @@ with tabs[3]:
                 st.dataframe(tabla)
     
         with col2:
-            st.markdown("### Crudos en segmentos DEBAJO")
+            st.markdown("### Crudos en segmentos Sobreestimados")
         
             if not crudos_debajo.empty:
         
