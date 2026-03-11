@@ -1658,46 +1658,6 @@ def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
         nuevo[key] = data_copy
 
     return nuevo
-def graficar_segmentos(df, titulo):
-
-    if df.empty:
-        st.info("No hay datos para esta gráfica")
-        return
-
-    import plotly.graph_objects as go
-
-    sondas = [c for c in df.columns if c not in ["Segmento","Promedio","STD","CV (%)"]]
-
-    fig = go.Figure()
-
-    for s in sondas:
-        fig.add_trace(
-            go.Scatter(
-                x=df["Segmento"],
-                y=df[s],
-                mode="lines+markers",
-                name=s
-            )
-        )
-
-    fig.add_trace(
-        go.Scatter(
-            x=df["Segmento"],
-            y=df["Promedio"],
-            mode="lines+markers",
-            name="Promedio segmento",
-            line=dict(color="black", width=5)
-        )
-    )
-
-    fig.update_layout(
-        title=titulo,
-        xaxis_title="Segmento",
-        yaxis_title="Velocidad corrosión",
-        height=500
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
 def calcular_perfil_teorico_por_segmentos(df_filtrado, segmentos, df_mpa, material):
 
     if df_mpa is None:
@@ -2633,14 +2593,6 @@ with tabs[1]:
         choices = {k: f"{v['source_name']} | {v['hoja']}" for k,v in st.session_state['processed_sheets'].items() if v.get('saved')}
         sel = st.multiselect("Selecciona hojas guardadas para combinar", options=list(choices.keys()), format_func=lambda x: choices[x], default=list(choices.keys()))
         if sel:
-            umbral_error_segmento = st.slider(
-                "Umbral error segmentos (%)",
-                min_value=0,
-                max_value=200,
-                value=40,
-                step=5,
-                key="slider_umbral_segmentos_comb"
-            )
             offsets = {}
             current_offset = 0.0
             downsample_threshold = 5000
@@ -2689,62 +2641,6 @@ with tabs[1]:
                 ff = pd.to_datetime(date_range[1])
                 fig.add_vrect(x0=fi, x1=ff, fillcolor="LightSalmon", opacity=0.3, layer="below", line_width=0)
                 st.plotly_chart(fig, use_container_width=True)
-                # ---------------------------------
-                # Construir tabla comparativa segmentos
-                # ---------------------------------
-                
-                segmentos_rows = []
-                
-                for k in sel:
-                    d = st.session_state['processed_sheets'][k]
-                
-                    for i, s in enumerate(d['segmentos_validos']):
-                        if s.get('estado','valido') != 'valido':
-                            continue
-                
-                        segmentos_rows.append({
-                            "Sonda": d['hoja'],
-                            "Segmento": i,
-                            "Velocidad": s.get("vel_abs")
-                        })
-                
-                df_seg = pd.DataFrame(segmentos_rows)
-                
-                if not df_seg.empty:
-                
-                    df_comp = df_seg.pivot_table(
-                        index="Segmento",
-                        columns="Sonda",
-                        values="Velocidad"
-                    ).reset_index()
-                
-                    # promedio entre sondas
-                    sondas_cols = [c for c in df_comp.columns if c != "Segmento"]
-                    df_comp["Promedio"] = df_comp[sondas_cols].mean(axis=1)
-                
-                    # CV %
-                    df_comp["STD"] = df_comp[sondas_cols].std(axis=1)
-                    df_comp["CV (%)"] = (df_comp["STD"] / df_comp["Promedio"]) * 100
-                    df_validos = df_comp[
-                        df_comp["CV (%)"].isna() | (df_comp["CV (%)"] <= umbral_error_segmento)
-                    ].copy()
-                    
-                    df_invalidos = df_comp[
-                        df_comp["CV (%)"] > umbral_error_segmento
-                    ].copy()
-                    st.subheader("Segmentos válidos")
-
-                    graficar_segmentos(
-                        df_validos,
-                        f"Segmentos válidos (CV ≤ {umbral_error_segmento}%)"
-                    )
-                    
-                    st.subheader("Segmentos no válidos")
-                    
-                    graficar_segmentos(
-                        df_invalidos,
-                        f"Segmentos no válidos (CV > {umbral_error_segmento}%)"
-                    )
                 if st.button("Extraer segmentos en intervalo seleccionado"):
                     extracted = []
                     for k in sel:
