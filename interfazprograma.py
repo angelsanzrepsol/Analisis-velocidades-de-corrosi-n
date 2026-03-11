@@ -3215,17 +3215,17 @@ with tabs[3]:
     # =========================================
     
     df_corr = df_comp.copy()
-
-    if not df_corr.empty and "Media velocidades" in df_corr.columns:
     
+    # Crear columnas solo si existen las originales
+    if "Media velocidades" in df_corr.columns:
         df_corr["Velocidad experimental"] = df_corr["Media velocidades"]
+    else:
+        df_corr["Velocidad experimental"] = np.nan
     
-    if not df_corr.empty and "Velocidad esperada" in df_corr.columns:
-    
+    if "Velocidad esperada" in df_corr.columns:
         df_corr["Velocidad teórica"] = df_corr["Velocidad esperada"]
-    
-    df_corr["Velocidad experimental"] = df_corr["Media velocidades"]
-    df_corr["Velocidad teórica"] = df_corr["Velocidad esperada"]
+    else:
+        df_corr["Velocidad teórica"] = np.nan
    
     if df_corr.empty:
         st.info("No hay datos suficientes.")
