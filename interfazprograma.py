@@ -1570,7 +1570,15 @@ def buscar_velocidad_mpa(df_mpa, temp, tan, material):
         return fila.get(col_cs)
     else:
         return fila.get(col_5cr)
+def obtener_cv_seguro(df):
 
+    if df is None or df.empty:
+        return None
+
+    if "Coef Variación (%)" not in df.columns:
+        return None
+
+    return pd.to_numeric(df["Coef Variación (%)"], errors="coerce")
 def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
 
     if df_mpa is None or pd.isna(temp) or pd.isna(tan):
@@ -1593,17 +1601,16 @@ def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
         return processed_sheets
 
     # segmentos válidos según CV
+    cv = obtener_cv_seguro(df_comp)
 
-    if not df_comp.empty and "Coef Variación (%)" in df_comp.columns:
-    
-        cv = pd.to_numeric(df_comp["Coef Variación (%)"], errors="coerce")
+    if cv is not None:
     
         df_validos = df_comp[
             cv.isna() | (cv <= umbral_cv)
         ].copy()
     
     else:
-        # si no existe la columna CV, no filtramos nada
+    
         df_validos = df_comp.copy()
 
     segmentos_validos = set(
