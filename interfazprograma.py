@@ -1589,10 +1589,10 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
 
 def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
 
-    if "Coef Variación (%)" not in df_comp.columns:
+    if df_comp is None or df_comp.empty:
         return processed_sheets
 
-    # Segmentos que pasan el umbral
+    # segmentos válidos según CV
     df_validos = df_comp[
         (df_comp["Coef Variación (%)"].isna()) |
         (df_comp["Coef Variación (%)"] <= umbral_cv)
@@ -1605,21 +1605,28 @@ def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
         )
     )
 
+    nuevo = {}
+
     for key, data in processed_sheets.items():
 
-        nuevos = []
+        segs = data.get("segmentos_validos", [])
 
-        for seg in data["segmentos_validos"]:
+        filtrados = []
 
-            fi = pd.to_datetime(seg["fecha_ini"])
-            ff = pd.to_datetime(seg["fecha_fin"])
+        for seg in segs:
 
-            if (fi, ff) in segmentos_validos:
-                nuevos.append(seg)
+            ini = pd.to_datetime(seg["fecha_ini"])
+            fin = pd.to_datetime(seg["fecha_fin"])
 
-        processed_sheets[key]["segmentos_validos"] = nuevos
+            if (ini, fin) in segmentos_validos:
+                filtrados.append(seg)
 
-    return processed_sheets
+        data_copy = data.copy()
+        data_copy["segmentos_validos"] = filtrados
+
+        nuevo[key] = data_copy
+
+    return nuevo
 def calcular_perfil_teorico_por_segmentos(df_filtrado, segmentos, df_mpa, material):
 
     if df_mpa is None:
@@ -3183,7 +3190,21 @@ with tabs[3]:
         st.session_state.get("df_mpa"),
         material_sel
     )
+    processed_filtrado = aplicar_umbral_error_segmentos(
+        processed_filtrado,
+        df_comp,
+        umbral_error_segmento
+    )
+    # =========================================
+    # TABLA CORREGIDA FINAL
+    # =========================================
     
+    df_corr = construir_tabla_corregida(
+        processed_filtrado,
+        st.session_state.get("df_mpa"),
+        material_sel,
+        sondas_seleccionadas
+    )
     # asegurar que CV sea numérico
     df_comp["Coef Variación (%)"] = pd.to_numeric(
         df_comp["Coef Variación (%)"],
