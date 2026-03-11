@@ -1658,6 +1658,22 @@ def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
         nuevo[key] = data_copy
 
     return nuevo
+def calcular_segmentos_crudo(df):
+
+    resumen = (
+        df.groupby("Especie")
+        .agg(
+            num_segmentos=("Segmento", "nunique"),
+            segmentos=("Segmento", lambda x: sorted(set(x)))
+        )
+        .reset_index()
+    )
+
+    resumen["segmentos"] = resumen["segmentos"].apply(
+        lambda x: ", ".join(map(str, x))
+    )
+
+    return resumen
 def calcular_perfil_teorico_por_segmentos(df_filtrado, segmentos, df_mpa, material):
 
     if df_mpa is None:
@@ -3582,30 +3598,60 @@ with tabs[3]:
     
         with col1:
             st.markdown("### Crudos en segmentos ENCIMA")
+        
             if not crudos_encima.empty:
-                st.dataframe(
-                    crudos_encima.groupby("Crudo")["Porcentaje_promedio"]
-                    .mean()
-                    .sort_values(ascending=False)
+        
+                tabla = (
+                    crudos_encima
+                    .groupby("Crudo")
+                    .agg(
+                        Porcentaje_promedio=("Porcentaje_promedio", "mean"),
+                        num_segmentos=("Segmento", "nunique"),
+                        segmentos=("Segmento", lambda x: ", ".join(map(str, sorted(set(x)))))
+                    )
+                    .sort_values("Porcentaje_promedio", ascending=False)
+                    .reset_index()
                 )
+        
+                st.dataframe(tabla)
     
         with col2:
             st.markdown("### Crudos en segmentos DEBAJO")
+        
             if not crudos_debajo.empty:
-                st.dataframe(
-                    crudos_debajo.groupby("Crudo")["Porcentaje_promedio"]
-                    .mean()
-                    .sort_values(ascending=False)
+        
+                tabla = (
+                    crudos_debajo
+                    .groupby("Crudo")
+                    .agg(
+                        Porcentaje_promedio=("Porcentaje_promedio", "mean"),
+                        num_segmentos=("Segmento", "nunique"),
+                        segmentos=("Segmento", lambda x: ", ".join(map(str, sorted(set(x)))))
+                    )
+                    .sort_values("Porcentaje_promedio", ascending=False)
+                    .reset_index()
                 )
+        
+                st.dataframe(tabla)
     
         with col3:
             st.markdown("### Crudos dentro del umbral")
+        
             if not crudos_dentro.empty:
-                st.dataframe(
-                    crudos_dentro.groupby("Crudo")["Porcentaje_promedio"]
-                    .mean()
-                    .sort_values(ascending=False)
+        
+                tabla = (
+                    crudos_dentro
+                    .groupby("Crudo")
+                    .agg(
+                        Porcentaje_promedio=("Porcentaje_promedio", "mean"),
+                        num_segmentos=("Segmento", "nunique"),
+                        segmentos=("Segmento", lambda x: ", ".join(map(str, sorted(set(x)))))
+                    )
+                    .sort_values("Porcentaje_promedio", ascending=False)
+                    .reset_index()
                 )
+        
+                st.dataframe(tabla)
     variables_proceso = [
         c for c in df_validos.columns
         if c not in [
