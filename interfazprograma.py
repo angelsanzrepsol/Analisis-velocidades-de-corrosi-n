@@ -1594,20 +1594,32 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
 
 def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
 
-    segmentos_validos_ids = set(
-        df_comp[
-            (df_comp["Coef Variación (%)"].isna()) |
-            (df_comp["Coef Variación (%)"] <= umbral_cv)
-        ]["Segmento"]
+    if "Coef Variación (%)" not in df_comp.columns:
+        return processed_sheets
+
+    # Segmentos que pasan el umbral
+    df_validos = df_comp[
+        (df_comp["Coef Variación (%)"].isna()) |
+        (df_comp["Coef Variación (%)"] <= umbral_cv)
+    ]
+
+    segmentos_validos = set(
+        zip(
+            pd.to_datetime(df_validos["Inicio"]),
+            pd.to_datetime(df_validos["Fin"])
+        )
     )
 
     for key, data in processed_sheets.items():
 
         nuevos = []
 
-        for i, seg in enumerate(data["segmentos_validos"], start=1):
+        for seg in data["segmentos_validos"]:
 
-            if f"Seg {i}" in segmentos_validos_ids:
+            fi = pd.to_datetime(seg["fecha_ini"])
+            ff = pd.to_datetime(seg["fecha_fin"])
+
+            if (fi, ff) in segmentos_validos:
                 nuevos.append(seg)
 
         processed_sheets[key]["segmentos_validos"] = nuevos
@@ -3135,16 +3147,35 @@ with tabs[3]:
         value=0.05,
         step=0.01
     )
+    # =========================================
+    # TABLA BASE ENTRE SONDAS
+    # =========================================
+    
+    df_comp = construir_tabla_segmentos_comparativa(
+        st.session_state.get("processed_sheets", {}),
+        st.session_state.get("df_mpa"),
+        material_sel
+    )
+    
+    # =========================================
+    # APLICAR UMBRAL DE ERROR ENTRE SONDAS
+    # =========================================
+    
+    processed_filtrado = aplicar_umbral_error_segmentos(
+        processed_filtrado,
+        df_comp,
+        st.session_state["umbral_error_segmento"]
+    )
+    
+    # =========================================
+    # TABLA CORREGIDA FINAL
+    # =========================================
+    
     df_corr = construir_tabla_corregida(
         processed_filtrado,
         st.session_state.get("df_mpa"),
         material_sel,
         sondas_seleccionadas
-    )
-    processed_filtrado = aplicar_umbral_error_segmentos(
-        processed_filtrado,
-        df_corr,
-        st.session_state["umbral_error_segmento"]
     )
     if df_corr.empty:
         st.info("No hay datos suficientes.")
@@ -3165,6 +3196,21 @@ with tabs[3]:
             else "DEBAJO" if x < -umbral_diag
             else "DENTRO"
     )
+    # =========================================
+    # AÑADIR CRUDOS A LA TABLA
+    # =========================================
+    
+    if "df_master_global" in st.session_state:
+    
+        df_master = st.session_state["df_master_global"]
+    
+        mapa_crudos = (
+            df_master.groupby(["Segmento"])["Crudo"]
+            .apply(lambda x: ", ".join(sorted(x.unique())))
+            .to_dict()
+        )
+    
+        df_validos["Crudos"] = df_validos["Segmento"].map(mapa_crudos)
     # ===============================
     # AÑADIR CRUDOS A DESCARTADOS
     # ===============================
@@ -3340,7 +3386,52 @@ with tabs[3]:
     st.subheader("Valores por debajo de la diagonal")
     st.dataframe(df_debajo)
     st.subheader("Relación con variables de proceso")
-
+    # =========================================
+    # ANALISIS DE CRUDOS POR ZONA
+    # =========================================
+    
+    if "df_master_global" in st.session_state:
+    
+        df_master = st.session_state["df_master_global"]
+    
+        st.subheader("Crudos involucrados en desviaciones del modelo")
+    
+        seg_encima = df_encima["Segmento"].unique()
+        seg_debajo = df_debajo["Segmento"].unique()
+        seg_dentro = df_dentro["Segmento"].unique()
+    
+        crudos_encima = df_master[df_master["Segmento"].isin(seg_encima)]
+        crudos_debajo = df_master[df_master["Segmento"].isin(seg_debajo)]
+        crudos_dentro = df_master[df_master["Segmento"].isin(seg_dentro)]
+    
+        col1, col2, col3 = st.columns(3)
+    
+        with col1:
+            st.markdown("### Crudos en segmentos ENCIMA")
+            if not crudos_encima.empty:
+                st.dataframe(
+                    crudos_encima.groupby("Crudo")["Porcentaje_promedio"]
+                    .mean()
+                    .sort_values(ascending=False)
+                )
+    
+        with col2:
+            st.markdown("### Crudos en segmentos DEBAJO")
+            if not crudos_debajo.empty:
+                st.dataframe(
+                    crudos_debajo.groupby("Crudo")["Porcentaje_promedio"]
+                    .mean()
+                    .sort_values(ascending=False)
+                )
+    
+        with col3:
+            st.markdown("### Crudos dentro del umbral")
+            if not crudos_dentro.empty:
+                st.dataframe(
+                    crudos_dentro.groupby("Crudo")["Porcentaje_promedio"]
+                    .mean()
+                    .sort_values(ascending=False)
+                )
     variables_proceso = [
         c for c in df_validos.columns
         if c not in [
@@ -3459,7 +3550,7 @@ with tabs[4]:
             detalle_crudos,
             st.session_state.get("processed_sheets", {})
         )
-    
+        st.session_state["df_master_global"] = df_master
         if df_master.empty:
             st.warning("No hay coincidencias con segmentos")
             st.stop()
