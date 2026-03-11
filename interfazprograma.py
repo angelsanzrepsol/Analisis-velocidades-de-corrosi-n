@@ -3561,7 +3561,8 @@ with tabs[4]:
         df_corr = construir_tabla_corregida(
             st.session_state.get("processed_sheets", {}),
             st.session_state.get("df_mpa"),
-            material_sel
+            material_sel,
+            sondas_seleccionadas
         )
         # =============================
         # BLOQUE 1 — ANALISIS SEGMENTOS
