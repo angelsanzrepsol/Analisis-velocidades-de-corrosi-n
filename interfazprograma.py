@@ -3183,12 +3183,22 @@ with tabs[3]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-    umbral_cv = st.session_state.get("umbral_error_segmento", 30)
-
+    
+    df_comp["Coef Variación (%)"] = pd.to_numeric(
+        df_comp["Coef Variación (%)"],
+        errors="coerce"
+    )
+    
+    st.write("Segmentos antes:", len(df_comp))
+    
+    umbral_cv = umbral_error_segmento
+    
     df_comp = df_comp[
         (df_comp["Coef Variación (%)"].isna()) |
         (df_comp["Coef Variación (%)"] <= umbral_cv)
     ]
+    
+    st.write("Segmentos después:", len(df_comp))
     # =========================================
     # APLICAR UMBRAL DE ERROR ENTRE SONDAS
     # =========================================
