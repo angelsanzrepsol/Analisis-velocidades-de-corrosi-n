@@ -3193,22 +3193,14 @@ with tabs[3]:
     # APLICAR UMBRAL DE ERROR ENTRE SONDAS
     # =========================================
     
-    processed_filtrado = aplicar_umbral_error_segmentos(
-        processed_filtrado,
-        df_comp,
-        st.session_state["umbral_error_segmento"]
-    )
-    
     # =========================================
     # TABLA CORREGIDA FINAL
     # =========================================
     
-    df_corr = construir_tabla_corregida(
-        processed_filtrado,
-        st.session_state.get("df_mpa"),
-        material_sel,
-        sondas_seleccionadas
-    )
+    df_corr = df_comp.copy()
+
+    df_corr["Velocidad experimental"] = df_corr["Media velocidades"]
+    df_corr["Velocidad teórica"] = df_corr["Velocidad esperada"]
     if df_corr.empty:
         st.info("No hay datos suficientes.")
         st.stop()
