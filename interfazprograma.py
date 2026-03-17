@@ -645,7 +645,16 @@ def procesar_crudos(df):
         tmp.columns = ["Fecha", "Porcentaje"]
     
         # nombre del crudo = nombre columna limpio
-        tmp["Especie"] = col
+        import re
+        
+        match = re.search(r'carga_comb\.([^.]+)\.', col.lower())
+        
+        if match:
+            nombre = match.group(1).upper()
+        else:
+            nombre = col
+        
+        tmp["Especie"] = nombre
     
         registros.append(tmp)
     
@@ -660,16 +669,7 @@ def procesar_crudos(df):
 
     detalle = detalle[detalle["Especie"] != "-"]
 
-    # -----------------------------
-    # Añadir SLOP
-    # -----------------------------
-    slop_df = df[["Fecha", "SLOP"]].copy()
-    slop_df = slop_df[slop_df["SLOP"] > 0]
-    slop_df["COMP"] = "SLOP"
-    slop_df["Especie"] = "SLOP"
-    slop_df.columns = ["Fecha", "Porcentaje", "COMP", "Especie"]
-
-    detalle = pd.concat([detalle, slop_df], ignore_index=True)
+    detalle = pd.concat([detalle], ignore_index=True)
 
     return detalle
 
