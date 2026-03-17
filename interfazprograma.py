@@ -198,9 +198,9 @@ def analizar_cestas_agrupadas(detalle_crudos, intervalos, df_master, df_proc):
             fi = row["fecha_ini"]
             ff = row["fecha_fin"]
 
-            segs = df_master[
-                (df_master["Fecha_inicio"] <= ff) &
-                (df_master["Fecha_fin"] >= fi)
+            segs = df_validos[
+                (pd.to_datetime(df_validos["Inicio"]) <= ff) &
+                (pd.to_datetime(df_validos["Fin"]) >= fi)
             ]
 
             if not segs.empty:
