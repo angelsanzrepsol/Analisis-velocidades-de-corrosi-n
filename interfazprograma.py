@@ -147,74 +147,118 @@ def construir_intervalos_cestas(df_cestas):
 
     return intervalos
 
-def analizar_cestas(detalle_crudos, intervalos, df_master, df_proc):
+def analizar_cestas_agrupadas(detalle_crudos, intervalos, df_master, df_proc):
 
     resultados = []
 
-    total_dias = intervalos["dias"].sum()
+    total_dias_global = intervalos["dias"].sum()
 
-    for _, row_cesta in intervalos.iterrows():
+    # 🔥 AGRUPAR POR CESTA
+    for cesta, df_cesta in intervalos.groupby("cesta"):
 
-        cesta = row_cesta["cesta"]
-        fi = row_cesta["fecha_ini"]
-        ff = row_cesta["fecha_fin"]
+        dias_totales = df_cesta["dias"].sum()
+        repeticiones = len(df_cesta)
 
-        # ======================
-        # MÉTRICAS BÁSICAS
-        # ======================
-        dias = row_cesta["dias"]
+        # =========================================
+        # 🔥 1. MEDIA DE PROCESO (BIEN HECHA)
+        # =========================================
 
-        # ======================
-        # CORROSIÓN
-        # ======================
-        segs = df_master[
-            (df_master["Fecha_inicio"] <= ff) &
-            (df_master["Fecha_fin"] >= fi)
-        ]
-
-        vel_media = segs["Velocidad_corr"].mean() if not segs.empty else None
-
-        # ======================
-        # VARIABLES PROCESO
-        # ======================
-        medias_proc = {}
+        sub_proc_total = []
 
         if df_proc is not None:
 
-            sub_proc = df_proc[
-                (df_proc["Fecha"] >= fi) &
-                (df_proc["Fecha"] <= ff)
+            for _, row in df_cesta.iterrows():
+
+                fi = row["fecha_ini"]
+                ff = row["fecha_fin"]
+
+                sub = df_proc[
+                    (df_proc["Fecha"] >= fi) &
+                    (df_proc["Fecha"] <= ff)
+                ]
+
+                if not sub.empty:
+                    sub_proc_total.append(sub)
+
+        if sub_proc_total:
+            df_proc_concat = pd.concat(sub_proc_total)
+            medias_proc = df_proc_concat.mean(numeric_only=True)
+        else:
+            medias_proc = pd.Series(dtype=float)
+
+        # =========================================
+        # 🔥 2. CORROSIÓN (BIEN CRUZADA)
+        # =========================================
+
+        velocidades = []
+        segmentos_ids = []
+
+        for _, row in df_cesta.iterrows():
+
+            fi = row["fecha_ini"]
+            ff = row["fecha_fin"]
+
+            segs = df_master[
+                (df_master["Fecha_inicio"] <= ff) &
+                (df_master["Fecha_fin"] >= fi)
             ]
 
-            if not sub_proc.empty:
-                medias_proc = sub_proc.mean(numeric_only=True).to_dict()
+            if not segs.empty:
+                velocidades.extend(segs["Velocidad_corr"].tolist())
+                segmentos_ids.extend(segs["Segmento"].tolist())
 
-        # ======================
-        # COMPOSICIÓN
-        # ======================
-        sub_crudos = detalle_crudos[
-            (detalle_crudos["Fecha"] >= fi) &
-            (detalle_crudos["Fecha"] <= ff)
-        ]
+        vel_media = np.mean(velocidades) if velocidades else None
 
-        comp = (
-            sub_crudos.groupby("Especie")["Porcentaje"]
-            .mean()
-            .to_dict()
-        )
+        # =========================================
+        # 🔥 3. COMPOSICIÓN REAL
+        # =========================================
+
+        sub_crudos_total = []
+
+        for _, row in df_cesta.iterrows():
+
+            fi = row["fecha_ini"]
+            ff = row["fecha_fin"]
+
+            sub = detalle_crudos[
+                (detalle_crudos["Fecha"] >= fi) &
+                (detalle_crudos["Fecha"] <= ff)
+            ]
+
+            if not sub.empty:
+                sub_crudos_total.append(sub)
+
+        if sub_crudos_total:
+            df_crudo_concat = pd.concat(sub_crudos_total)
+
+            comp = (
+                df_crudo_concat
+                .groupby("Especie")["Porcentaje"]
+                .mean()
+            )
+        else:
+            comp = pd.Series(dtype=float)
+
+        # =========================================
+        # 🔥 RESULTADO FINAL
+        # =========================================
 
         resultados.append({
             "Cesta": ", ".join(cesta),
-            "Fecha inicio": fi,
-            "Fecha fin": ff,
-            "Días": dias,
-            "% presencia": dias / total_dias * 100,
-            "Velocidad corrosión": vel_media,
-            **medias_proc,
-            **{f"%_{k}": v for k,v in comp.items()}
+            "Repeticiones": repeticiones,
+            "Días totales": dias_totales,
+            "% presencia": dias_totales / total_dias_global * 100,
+            "Velocidad media": vel_media,
+            "Segmentos asociados": ", ".join(map(str, sorted(set(segmentos_ids)))),
+
+            **medias_proc.to_dict(),
+            **{f"%_{k}": v for k,v in comp.to_dict().items()}
         })
 
-    return pd.DataFrame(resultados)
+    return pd.DataFrame(resultados).sort_values(
+        "% presencia",
+        ascending=False
+    )
 
 def obtener_composicion_cestas(intervalos, detalle_crudos):
 
@@ -3900,32 +3944,26 @@ with tabs[3]:
     
     st.plotly_chart(fig_arriba, use_container_width=True)
     
-    st.subheader("🧺 Cestas de crudo (automático)")
+    st.subheader("🧺 Cestas de crudo (agrupadas)")
 
     if "df_master_global" in st.session_state and uploaded_crudos is not None:
     
-        try:
+        hojas = leer_archivo(uploaded_crudos)
+        hoja = list(hojas.keys())[0]
+        df_crudos = hojas[hoja]
     
-            # YA LO TIENES
-            hojas = leer_archivo(uploaded_crudos)
-            hoja = list(hojas.keys())[0]
-            df_crudos = hojas[hoja]
+        detalle_crudos = procesar_crudos(df_crudos)
     
-            detalle_crudos = procesar_crudos(df_crudos)
+        intervalos = detectar_cestas_desde_detalle(detalle_crudos)
     
-            intervalos = detectar_cestas_desde_detalle(detalle_crudos)
+        df_cestas = analizar_cestas_agrupadas(
+            detalle_crudos,
+            intervalos,
+            st.session_state.get("df_master_global"),
+            st.session_state.get("df_proc")
+        )
     
-            df_cestas = analizar_cestas(
-                detalle_crudos,
-                intervalos,
-                st.session_state.get("df_master_global"),
-                st.session_state.get("df_proc")
-            )
-    
-            st.dataframe(df_cestas)
-    
-        except Exception as e:
-            st.error(f"Error en análisis de cestas: {e}")
+        st.dataframe(df_cestas)
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
 
