@@ -204,7 +204,7 @@ def analizar_cestas_agrupadas(detalle_crudos, intervalos, df_master, df_proc):
             ]
 
             if not segs.empty:
-                velocidades.extend(segs["Velocidad_corr"].tolist())
+                velocidades.extend(segs["Velocidad experimental"].dropna().tolist())
                 segmentos_ids.extend(segs["Segmento"].tolist())
 
         vel_media = np.mean(velocidades) if velocidades else None
