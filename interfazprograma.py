@@ -621,10 +621,14 @@ def procesar_crudos(df):
     # -----------------------------
     # Detectar columnas COMP y %
     # -----------------------------
+    comp_cols = [c for c in df.columns if "comp" in c.lower() and "porc" not in c.lower()]
     porc_cols = [c for c in df.columns if "porccomp" in c.lower()]
 
-    if not porc_cols:
-        raise ValueError("No se detectaron columnas PORCCOMP")
+    comp_cols = sorted(comp_cols)
+    porc_cols = sorted(porc_cols)
+
+    if not comp_cols or not porc_cols:
+        raise ValueError("No se detectaron columnas COMP / PORCCOMP")
 
     # Convertir porcentajes
     df[porc_cols] = df[porc_cols].apply(pd.to_numeric, errors="coerce")
@@ -645,17 +649,12 @@ def procesar_crudos(df):
     # -----------------------------
     registros = []
 
-    for i, col in enumerate(porc_cols):
+    for i in range(min(len(comp_cols), len(porc_cols))):
 
-        tmp = df[["Fecha", col]].copy()
-        tmp.columns = ["Fecha", "Porcentaje"]
-    
-        # 🔥 sacar especie del nombre de columna
-        especie = str(col).split("PORCCOMP")[-1]
-    
-        tmp["Especie"] = especie
+        tmp = df[["Fecha", porc_cols[i], comp_cols[i]]].copy()
+        tmp.columns = ["Fecha", "Porcentaje", "Especie"]
         tmp["COMP"] = f"COMP{i+1}"
-    
+
         registros.append(tmp)
 
     detalle = pd.concat(registros, ignore_index=True)
