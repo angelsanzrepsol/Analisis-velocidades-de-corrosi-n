@@ -618,46 +618,42 @@ def procesar_crudos(df):
     df["Fecha"] = pd.to_datetime(df[fecha_col], errors="coerce")
 
 
-    # -----------------------------
-    # Detectar columnas COMP y %
-    # -----------------------------
-    comp_cols = [c for c in df.columns if "comp" in c.lower() and "porc" not in c.lower()]
-    porc_cols = [c for c in df.columns if "porccomp" in c.lower()]
-
-    comp_cols = sorted(comp_cols)
-    porc_cols = sorted(porc_cols)
-
-    if not comp_cols or not porc_cols:
-        raise ValueError("No se detectaron columnas COMP / PORCCOMP")
-
-    # Convertir porcentajes
-    df[porc_cols] = df[porc_cols].apply(pd.to_numeric, errors="coerce")
-
-    # -----------------------------
-    # Crear SLOP si no suma 100
-    # -----------------------------
-    df["SUMA_COMP"] = df[porc_cols].sum(axis=1)
-
-    df["SLOP"] = np.where(
-        df["SUMA_COMP"] < 100,
-        100 - df["SUMA_COMP"],
-        0
-    )
-
-    # -----------------------------
-    # Crear tabla diaria
-    # -----------------------------
+    # ==============================
+    # DETECTAR COLUMNAS CARGA_COMB
+    # ==============================
+    
+    crudo_cols = [
+        c for c in df.columns
+        if "carga_comb" in str(c).lower()
+    ]
+    
+    if not crudo_cols:
+        raise ValueError("No se detectaron columnas Carga_Comb")
+    
+    # Convertir a numérico
+    df[crudo_cols] = df[crudo_cols].apply(pd.to_numeric, errors="coerce")
+    
+    # ==============================
+    # CREAR FORMATO LARGO
+    # ==============================
+    
     registros = []
-
-    for i in range(min(len(comp_cols), len(porc_cols))):
-
-        tmp = df[["Fecha", porc_cols[i], comp_cols[i]]].copy()
-        tmp.columns = ["Fecha", "Porcentaje", "Especie"]
-        tmp["COMP"] = f"COMP{i+1}"
-
+    
+    for col in crudo_cols:
+    
+        tmp = df[["Fecha", col]].copy()
+        tmp.columns = ["Fecha", "Porcentaje"]
+    
+        # nombre del crudo = nombre columna limpio
+        tmp["Especie"] = col
+    
         registros.append(tmp)
-
+    
     detalle = pd.concat(registros, ignore_index=True)
+    
+    # limpiar
+    detalle = detalle.dropna(subset=["Porcentaje"])
+    detalle = detalle[detalle["Porcentaje"] > 0]
 
     detalle["Porcentaje"] = pd.to_numeric(detalle["Porcentaje"], errors="coerce")
     detalle = detalle.dropna()
