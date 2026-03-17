@@ -857,7 +857,46 @@ def analizar_crudos_agresividad(df_master):
         "Score agresividad",
         ascending=False
     )
+def leer_crudos_bien(uploaded_file):
 
+    df_raw = pd.read_excel(uploaded_file, header=None)
+
+    fila_tipo = df_raw.iloc[0]
+    fila_header = df_raw.iloc[2]
+
+    # columnas válidas = solo Carga_Comb
+    cols_validas = [
+        i for i, val in enumerate(fila_tipo)
+        if isinstance(val, str) and "carga_comb" in val.lower()
+    ]
+
+    if not cols_validas:
+        raise ValueError("No se encontraron columnas Carga_Comb")
+
+    df = df_raw.iloc[3:].copy()
+    df.columns = fila_header
+
+    # detectar fecha
+    fecha_col = None
+    for c in df.columns:
+        if any(k in str(c).lower() for k in ["fecha", "date", "time"]):
+            fecha_col = c
+            break
+
+    if fecha_col is None:
+        raise ValueError("No se detectó columna fecha")
+
+    # columnas finales
+    cols_finales = [fecha_col] + [df.columns[i] for i in cols_validas]
+
+    df = df[cols_finales].copy()
+
+    df[fecha_col] = pd.to_datetime(df[fecha_col], errors="coerce")
+    df = df.dropna(subset=[fecha_col])
+
+    df = df.rename(columns={fecha_col: "Fecha"})
+
+    return df
 def cargar_proceso_primera_hoja_limpio(path_excel):
 
     # Leer primera hoja completa
@@ -2288,7 +2327,7 @@ if uploaded_crudos is not None:
 
             hoja_crudos = list(hojas_crudos.keys())[0]
 
-            df_crudos = hojas_crudos[hoja_crudos]
+            df_crudos = leer_crudos_bien(uploaded_crudos)
 
             detalle_crudos = procesar_crudos(df_crudos)
 
@@ -3950,7 +3989,7 @@ with tabs[3]:
     
         hojas = leer_archivo(uploaded_crudos)
         hoja = list(hojas.keys())[0]
-        df_crudos = hojas[hoja]
+        df_crudos = leer_crudos_bien(uploaded_crudos)
     
         detalle_crudos = procesar_crudos(df_crudos)
     
@@ -3976,7 +4015,7 @@ with tabs[4]:
     
         hojas = leer_archivo(uploaded_crudos)
         hoja_sel = st.selectbox("Hoja crudos", list(hojas.keys()))
-        df_crudos = hojas[hoja_sel]
+        df_crudos = leer_crudos_bien(uploaded_crudos)
     
         detalle_crudos = procesar_crudos(df_crudos)
     
