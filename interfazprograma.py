@@ -859,42 +859,36 @@ def analizar_crudos_agresividad(df_master):
     )
 def leer_crudos_bien(uploaded_file):
 
-    df_raw = pd.read_excel(uploaded_file, header=None)
+    df = pd.read_excel(uploaded_file)
 
-    fila_tipo = df_raw.iloc[0]
-    fila_header = df_raw.iloc[2]
-
-    # columnas válidas = solo Carga_Comb
-    cols_validas = [
-        i for i, val in enumerate(fila_tipo)
-        if isinstance(val, str) and "carga_comb" in val.lower()
-    ]
-
-    if not cols_validas:
-        raise ValueError("No se encontraron columnas Carga_Comb")
-
-    df = df_raw.iloc[3:].copy()
-    df.columns = fila_header
-
-    # detectar fecha
-    fecha_col = None
-    for c in df.columns:
-        if any(k in str(c).lower() for k in ["fecha", "date", "time"]):
-            fecha_col = c
-            break
-
-    if fecha_col is None:
-        raise ValueError("No se detectó columna fecha")
-
-    # columnas finales
-    cols_finales = [fecha_col] + [df.columns[i] for i in cols_validas]
-
-    df = df[cols_finales].copy()
+    # -------------------------
+    # 1️⃣ FECHA = PRIMERA COLUMNA
+    # -------------------------
+    fecha_col = df.columns[0]
 
     df[fecha_col] = pd.to_datetime(df[fecha_col], errors="coerce")
     df = df.dropna(subset=[fecha_col])
 
     df = df.rename(columns={fecha_col: "Fecha"})
+
+    # -------------------------
+    # 2️⃣ SOLO CARGA_COMB (🔥 CLAVE)
+    # -------------------------
+    crudo_cols = [
+        c for c in df.columns
+        if (
+            "porccomp" in str(c).lower()
+            and "carga_comb" in str(c).lower()
+        )
+    ]
+
+    if not crudo_cols:
+        raise ValueError("No se encontraron columnas Carga_Comb")
+
+    # -------------------------
+    # 3️⃣ DATAFRAME FINAL
+    # -------------------------
+    df = df[["Fecha"] + crudo_cols].copy()
 
     return df
 def cargar_proceso_primera_hoja_limpio(path_excel):
