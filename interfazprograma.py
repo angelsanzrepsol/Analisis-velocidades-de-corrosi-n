@@ -97,200 +97,7 @@ def dividir_todos_segmentos(
             nuevos.append(seg)
 
     return sorted(nuevos, key=lambda x: x["fecha_ini"])
-def detectar_cestas_desde_detalle(detalle_crudos):
 
-    df = detalle_crudos.copy()
-
-    df["Fecha"] = pd.to_datetime(df["Fecha"])
-
-    # 1️⃣ Obtener conjunto de crudos por día
-    cestas_dia = (
-        df.groupby("Fecha")["Especie"]
-        .apply(lambda x: tuple(sorted(set(x))))
-        .reset_index(name="cesta")
-    )
-
-    # 2️⃣ Detectar cambios de cesta
-    cestas_dia["cambio"] = cestas_dia["cesta"] != cestas_dia["cesta"].shift()
-    cestas_dia["grupo"] = cestas_dia["cambio"].cumsum()
-
-    # 3️⃣ Construir intervalos continuos
-    intervalos = (
-        cestas_dia.groupby("grupo")
-        .agg(
-            fecha_ini=("Fecha", "min"),
-            fecha_fin=("Fecha", "max"),
-            cesta=("cesta", "first"),
-            dias=("Fecha", "count")
-        )
-        .reset_index(drop=True)
-    )
-
-    return intervalos
-def construir_intervalos_cestas(df_cestas):
-
-    df = df_cestas.sort_values("Fecha").reset_index(drop=True)
-
-    df["cambio"] = df["Cesta"] != df["Cesta"].shift()
-    df["grupo"] = df["cambio"].cumsum()
-
-    intervalos = (
-        df.groupby("grupo")
-        .agg(
-            fecha_ini=("Fecha", "min"),
-            fecha_fin=("Fecha", "max"),
-            cesta=("Cesta", "first"),
-            dias=("Fecha", "count")
-        )
-        .reset_index(drop=True)
-    )
-
-    return intervalos
-
-def analizar_cestas_agrupadas(detalle_crudos, intervalos, df_master, df_proc):
-
-    resultados = []
-
-    total_dias_global = intervalos["dias"].sum()
-
-    # 🔥 AGRUPAR POR CESTA
-    for cesta, df_cesta in intervalos.groupby("cesta"):
-
-        dias_totales = df_cesta["dias"].sum()
-        repeticiones = len(df_cesta)
-
-        # =========================================
-        # 🔥 1. MEDIA DE PROCESO (BIEN HECHA)
-        # =========================================
-
-        sub_proc_total = []
-
-        if df_proc is not None:
-
-            for _, row in df_cesta.iterrows():
-
-                fi = row["fecha_ini"]
-                ff = row["fecha_fin"]
-
-                sub = df_proc[
-                    (df_proc["Fecha"] >= fi) &
-                    (df_proc["Fecha"] <= ff)
-                ]
-
-                if not sub.empty:
-                    sub_proc_total.append(sub)
-
-        if sub_proc_total:
-            df_proc_concat = pd.concat(sub_proc_total)
-            medias_proc = df_proc_concat.mean(numeric_only=True)
-        else:
-            medias_proc = pd.Series(dtype=float)
-
-        # =========================================
-        # 🔥 2. CORROSIÓN (BIEN CRUZADA)
-        # =========================================
-
-        velocidades = []
-        segmentos_ids = []
-
-        for _, row in df_cesta.iterrows():
-
-            fi = row["fecha_ini"]
-            ff = row["fecha_fin"]
-
-            segs = df_validos[
-                (pd.to_datetime(df_validos["Inicio"]) <= ff) &
-                (pd.to_datetime(df_validos["Fin"]) >= fi)
-            ]
-
-            if not segs.empty:
-                velocidades.extend(segs["Velocidad experimental"].dropna().tolist())
-                segmentos_ids.extend(segs["Segmento"].tolist())
-
-        vel_media = np.mean(velocidades) if velocidades else None
-
-        # =========================================
-        # 🔥 3. COMPOSICIÓN REAL
-        # =========================================
-
-        sub_crudos_total = []
-
-        for _, row in df_cesta.iterrows():
-
-            fi = row["fecha_ini"]
-            ff = row["fecha_fin"]
-
-            sub = detalle_crudos[
-                (detalle_crudos["Fecha"] >= fi) &
-                (detalle_crudos["Fecha"] <= ff)
-            ]
-
-            if not sub.empty:
-                sub_crudos_total.append(sub)
-
-        if sub_crudos_total:
-            df_crudo_concat = pd.concat(sub_crudos_total)
-
-            comp = (
-                df_crudo_concat
-                .groupby("Especie")["Porcentaje"]
-                .mean()
-            )
-        else:
-            comp = pd.Series(dtype=float)
-
-        # =========================================
-        # 🔥 RESULTADO FINAL
-        # =========================================
-
-        resultados.append({
-            "Cesta": ", ".join(cesta),
-            "Repeticiones": repeticiones,
-            "Días totales": dias_totales,
-            "% presencia": dias_totales / total_dias_global * 100,
-            "Velocidad media": vel_media,
-            "Segmentos asociados": ", ".join(map(str, sorted(set(segmentos_ids)))),
-
-            **medias_proc.to_dict(),
-            **{f"%_{k}": v for k,v in comp.to_dict().items()}
-        })
-
-    return pd.DataFrame(resultados).sort_values(
-        "% presencia",
-        ascending=False
-    )
-
-def obtener_composicion_cestas(intervalos, detalle_crudos):
-
-    filas = []
-
-    for _, row in intervalos.iterrows():
-
-        fi = row["fecha_ini"]
-        ff = row["fecha_fin"]
-
-        sub = detalle_crudos[
-            (detalle_crudos["Fecha"] >= fi) &
-            (detalle_crudos["Fecha"] <= ff)
-        ]
-
-        if sub.empty:
-            continue
-
-        comp = (
-            sub.groupby("Especie")["Porcentaje"]
-            .mean()
-            .reset_index()
-        )
-
-        for _, r in comp.iterrows():
-            filas.append({
-                "Cesta": ", ".join(row["cesta"]),
-                "Crudo": r["Especie"],
-                "% medio": r["Porcentaje"]
-            })
-
-    return pd.DataFrame(filas)
 def calcular_calidad_segmento(df_filtrado, seg):
 
     try:
@@ -618,58 +425,62 @@ def procesar_crudos(df):
     df["Fecha"] = pd.to_datetime(df[fecha_col], errors="coerce")
 
 
-    # ==============================
-    # DETECTAR COLUMNAS CARGA_COMB
-    # ==============================
-    
-    crudo_cols = [
-        c for c in df.columns
-        if "carga_comb" in str(c).lower()
-    ]
-    
-    if not crudo_cols:
-        raise ValueError("No se detectaron columnas Carga_Comb")
-    
-    # Convertir a numérico
-    df[crudo_cols] = df[crudo_cols].apply(pd.to_numeric, errors="coerce")
-    
-    # ==============================
-    # CREAR FORMATO LARGO
-    # ==============================
-    
+    # -----------------------------
+    # Detectar columnas COMP y %
+    # -----------------------------
+    comp_cols = [c for c in df.columns if "comp" in c.lower() and "porc" not in c.lower()]
+    porc_cols = [c for c in df.columns if "porccomp" in c.lower()]
+
+    comp_cols = sorted(comp_cols)
+    porc_cols = sorted(porc_cols)
+
+    if not comp_cols or not porc_cols:
+        raise ValueError("No se detectaron columnas COMP / PORCCOMP")
+
+    # Convertir porcentajes
+    df[porc_cols] = df[porc_cols].apply(pd.to_numeric, errors="coerce")
+
+    # -----------------------------
+    # Crear SLOP si no suma 100
+    # -----------------------------
+    df["SUMA_COMP"] = df[porc_cols].sum(axis=1)
+
+    df["SLOP"] = np.where(
+        df["SUMA_COMP"] < 100,
+        100 - df["SUMA_COMP"],
+        0
+    )
+
+    # -----------------------------
+    # Crear tabla diaria
+    # -----------------------------
     registros = []
-    
-    for col in crudo_cols:
-    
-        tmp = df[["Fecha", col]].copy()
-        tmp.columns = ["Fecha", "Porcentaje"]
-    
-        # nombre del crudo = nombre columna limpio
-        import re
-        
-        match = re.search(r'carga_comb\.([^.]+)\.', col.lower())
-        
-        if match:
-            nombre = match.group(1).upper()
-        else:
-            nombre = col
-        
-        tmp["Especie"] = nombre
-    
+
+    for i in range(min(len(comp_cols), len(porc_cols))):
+
+        tmp = df[["Fecha", porc_cols[i], comp_cols[i]]].copy()
+        tmp.columns = ["Fecha", "Porcentaje", "Especie"]
+        tmp["COMP"] = f"COMP{i+1}"
+
         registros.append(tmp)
-    
+
     detalle = pd.concat(registros, ignore_index=True)
-    
-    # limpiar
-    detalle = detalle.dropna(subset=["Porcentaje"])
-    detalle = detalle[detalle["Porcentaje"] > 0]
 
     detalle["Porcentaje"] = pd.to_numeric(detalle["Porcentaje"], errors="coerce")
     detalle = detalle.dropna()
 
     detalle = detalle[detalle["Especie"] != "-"]
 
-    detalle = pd.concat([detalle], ignore_index=True)
+    # -----------------------------
+    # Añadir SLOP
+    # -----------------------------
+    slop_df = df[["Fecha", "SLOP"]].copy()
+    slop_df = slop_df[slop_df["SLOP"] > 0]
+    slop_df["COMP"] = "SLOP"
+    slop_df["Especie"] = "SLOP"
+    slop_df.columns = ["Fecha", "Porcentaje", "COMP", "Especie"]
+
+    detalle = pd.concat([detalle, slop_df], ignore_index=True)
 
     return detalle
 
@@ -692,6 +503,8 @@ def añadir_proceso_a_dias_crudo(df_dias_crudo, df_proc):
     )
 
     return df_merge
+
+
 
 def asignar_crudos_a_segmentos(detalle_crudos, processed_sheets):
 
@@ -851,40 +664,7 @@ def analizar_crudos_agresividad(df_master):
         "Score agresividad",
         ascending=False
     )
-def leer_crudos_bien(uploaded_file):
 
-    df = pd.read_excel(uploaded_file)
-
-    # -------------------------
-    # 1️⃣ FECHA = PRIMERA COLUMNA
-    # -------------------------
-    fecha_col = df.columns[0]
-
-    df[fecha_col] = pd.to_datetime(df[fecha_col], errors="coerce")
-    df = df.dropna(subset=[fecha_col])
-
-    df = df.rename(columns={fecha_col: "Fecha"})
-
-    # -------------------------
-    # 2️⃣ SOLO CARGA_COMB (🔥 CLAVE)
-    # -------------------------
-    crudo_cols = [
-        c for c in df.columns
-        if (
-            "porccomp" in str(c).lower()
-            and "carga_comb" in str(c).lower()
-        )
-    ]
-
-    if not crudo_cols:
-        raise ValueError("No se encontraron columnas Carga_Comb")
-
-    # -------------------------
-    # 3️⃣ DATAFRAME FINAL
-    # -------------------------
-    df = df[["Fecha"] + crudo_cols].copy()
-
-    return df
 def cargar_proceso_primera_hoja_limpio(path_excel):
 
     # Leer primera hoja completa
@@ -2315,7 +2095,7 @@ if uploaded_crudos is not None:
 
             hoja_crudos = list(hojas_crudos.keys())[0]
 
-            df_crudos = leer_crudos_bien(uploaded_crudos)
+            df_crudos = hojas_crudos[hoja_crudos]
 
             detalle_crudos = procesar_crudos(df_crudos)
 
@@ -3970,27 +3750,6 @@ with tabs[3]:
     )
     
     st.plotly_chart(fig_arriba, use_container_width=True)
-    
-    st.subheader("🧺 Cestas de crudo (agrupadas)")
-
-    if "df_master_global" in st.session_state and uploaded_crudos is not None:
-    
-        hojas = leer_archivo(uploaded_crudos)
-        hoja = list(hojas.keys())[0]
-        df_crudos = leer_crudos_bien(uploaded_crudos)
-    
-        detalle_crudos = procesar_crudos(df_crudos)
-    
-        intervalos = detectar_cestas_desde_detalle(detalle_crudos)
-    
-        df_cestas = analizar_cestas_agrupadas(
-            detalle_crudos,
-            intervalos,
-            st.session_state.get("df_master_global"),
-            st.session_state.get("df_proc")
-        )
-    
-        st.dataframe(df_cestas)
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
 
@@ -4003,7 +3762,7 @@ with tabs[4]:
     
         hojas = leer_archivo(uploaded_crudos)
         hoja_sel = st.selectbox("Hoja crudos", list(hojas.keys()))
-        df_crudos = leer_crudos_bien(uploaded_crudos)
+        df_crudos = hojas[hoja_sel]
     
         detalle_crudos = procesar_crudos(df_crudos)
     
