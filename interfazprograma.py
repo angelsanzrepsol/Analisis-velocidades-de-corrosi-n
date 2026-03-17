@@ -97,7 +97,166 @@ def dividir_todos_segmentos(
             nuevos.append(seg)
 
     return sorted(nuevos, key=lambda x: x["fecha_ini"])
+def cargar_cestas_excel(uploaded_file):
 
+    df = pd.read_excel(uploaded_file)
+
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # Detectar fecha automáticamente
+    fecha_col = None
+    for c in df.columns:
+        if any(k in c.lower() for k in ["fecha", "date", "time"]):
+            fecha_col = c
+            break
+
+    if fecha_col is None:
+        raise ValueError("No se encontró columna de fecha en cestas")
+
+    df["Fecha"] = pd.to_datetime(df[fecha_col], errors="coerce")
+
+    # Detectar columnas de crudo
+    crudo_cols = [c for c in df.columns if "comp" in c.lower()]
+
+    # Crear lista de crudos por día
+    filas = []
+
+    for _, row in df.iterrows():
+
+        crudos = []
+
+        for c in crudo_cols:
+            val = row[c]
+
+            if pd.notna(val) and val != "-":
+                crudos.append(str(val).strip())
+
+        filas.append({
+            "Fecha": row["Fecha"],
+            "Cesta": tuple(sorted(set(crudos)))
+        })
+
+    return pd.DataFrame(filas)
+
+def construir_intervalos_cestas(df_cestas):
+
+    df = df_cestas.sort_values("Fecha").reset_index(drop=True)
+
+    df["cambio"] = df["Cesta"] != df["Cesta"].shift()
+    df["grupo"] = df["cambio"].cumsum()
+
+    intervalos = (
+        df.groupby("grupo")
+        .agg(
+            fecha_ini=("Fecha", "min"),
+            fecha_fin=("Fecha", "max"),
+            cesta=("Cesta", "first"),
+            dias=("Fecha", "count")
+        )
+        .reset_index(drop=True)
+    )
+
+    return intervalos
+
+def analizar_cestas_completo(intervalos, df_master, df_proc):
+
+    resultados = []
+
+    total_dias = intervalos["dias"].sum()
+
+    for cesta, sub in intervalos.groupby("cesta"):
+
+        dias_totales = sub["dias"].sum()
+        repeticiones = len(sub)
+
+        pct_dias = dias_totales / total_dias * 100
+
+        velocidades = []
+        medias_proc = []
+
+        for _, row in sub.iterrows():
+
+            fi = row["fecha_ini"]
+            ff = row["fecha_fin"]
+
+            # =====================
+            # CORROSIÓN
+            # =====================
+            segs = df_master[
+                (df_master["Fecha_inicio"] <= ff) &
+                (df_master["Fecha_fin"] >= fi)
+            ]
+
+            if not segs.empty:
+                velocidades.append(segs["Velocidad_corr"].mean())
+
+            # =====================
+            # PROCESO
+            # =====================
+            if df_proc is not None:
+
+                sub_proc = df_proc[
+                    (df_proc["Fecha"] >= fi) &
+                    (df_proc["Fecha"] <= ff)
+                ]
+
+                if not sub_proc.empty:
+                    medias_proc.append(
+                        sub_proc.mean(numeric_only=True)
+                    )
+
+        vel_media = np.mean(velocidades) if velocidades else None
+
+        if medias_proc:
+            medias_proc = pd.DataFrame(medias_proc).mean()
+        else:
+            medias_proc = pd.Series(dtype=float)
+
+        resultados.append({
+            "Cesta": ", ".join(cesta),
+            "Repeticiones": repeticiones,
+            "Días totales": dias_totales,
+            "% presencia": pct_dias,
+            "Velocidad media corrosión": vel_media,
+            **medias_proc.to_dict()
+        })
+
+    return pd.DataFrame(resultados).sort_values(
+        "% presencia",
+        ascending=False
+    )
+
+def obtener_composicion_cestas(intervalos, detalle_crudos):
+
+    filas = []
+
+    for _, row in intervalos.iterrows():
+
+        fi = row["fecha_ini"]
+        ff = row["fecha_fin"]
+
+        sub = detalle_crudos[
+            (detalle_crudos["Fecha"] >= fi) &
+            (detalle_crudos["Fecha"] <= ff)
+        ]
+
+        if sub.empty:
+            continue
+
+        comp = (
+            sub.groupby("Especie")["Porcentaje"]
+            .mean()
+            .reset_index()
+        )
+
+        for _, r in comp.iterrows():
+            filas.append({
+                "Cesta": ", ".join(row["cesta"]),
+                "Crudo": r["Especie"],
+                "% medio": r["Porcentaje"]
+            })
+
+    return pd.DataFrame(filas)
 def calcular_calidad_segmento(df_filtrado, seg):
 
     try:
@@ -3750,6 +3909,48 @@ with tabs[3]:
     )
     
     st.plotly_chart(fig_arriba, use_container_width=True)
+    
+    st.subheader("Análisis de cestas de crudo")
+    uploaded_cestas = st.file_uploader(
+        "Sube Excel de cestas de crudo",
+        type=["xlsx"],
+        key="cestas"
+    )
+    
+    if uploaded_cestas is not None:
+    
+        try:
+            df_cestas = cargar_cestas_excel(uploaded_cestas)
+    
+            intervalos = construir_intervalos_cestas(df_cestas)
+    
+            df_master = st.session_state.get("df_master_global")
+            df_proc = st.session_state.get("df_proc")
+    
+            df_resumen_cestas = analizar_cestas_completo(
+                intervalos,
+                df_master,
+                df_proc
+            )
+    
+            st.markdown("### 📊 Resumen de cestas")
+            st.dataframe(df_resumen_cestas)
+    
+            # Composición
+            if "df_master_global" in st.session_state:
+    
+                detalle_crudos = procesar_crudos(df_crudos)
+    
+                df_comp = obtener_composicion_cestas(
+                    intervalos,
+                    detalle_crudos
+                )
+    
+                st.markdown("### 🧪 Composición de cestas")
+                st.dataframe(df_comp)
+    
+        except Exception as e:
+            st.error(f"Error procesando cestas: {e}")
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
 
