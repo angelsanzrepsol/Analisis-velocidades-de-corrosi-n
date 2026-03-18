@@ -97,6 +97,115 @@ def dividir_todos_segmentos(
             nuevos.append(seg)
 
     return sorted(nuevos, key=lambda x: x["fecha_ini"])
+def construir_cestas_crudo(detalle_crudos):
+
+    if detalle_crudos.empty:
+        return pd.DataFrame()
+
+    # Agrupar por día → conjunto de especies
+    df_day = (
+        detalle_crudos
+        .groupby("Fecha")["Especie"]
+        .apply(lambda x: tuple(sorted(set(x))))
+        .reset_index()
+    )
+
+    # Detectar cambios de cesta
+    df_day["cambio"] = df_day["Especie"] != df_day["Especie"].shift()
+    df_day["grupo"] = df_day["cambio"].cumsum()
+
+    # Agrupar en cestas
+    cestas = (
+        df_day.groupby("grupo")
+        .agg(
+            Fecha_ini=("Fecha", "min"),
+            Fecha_fin=("Fecha", "max"),
+            Especies=("Especie", "first"),
+            Dias=("Fecha", "count")
+        )
+        .reset_index(drop=True)
+    )
+
+    return cestas
+
+def analizar_cestas(
+    cestas,
+    df_validos,
+    df_proc
+):
+
+    resultados = []
+
+    for i, cesta in cestas.iterrows():
+
+        fi = pd.to_datetime(cesta["Fecha_ini"])
+        ff = pd.to_datetime(cesta["Fecha_fin"])
+
+        # 🔎 Buscar segmento donde cae
+        seg_match = df_validos[
+            (df_validos["Inicio"] <= ff) &
+            (df_validos["Fin"] >= fi)
+        ]
+
+        if seg_match.empty:
+            continue
+
+        seg = seg_match.iloc[0]
+
+        # 🔎 medias de proceso en ese intervalo
+        if df_proc is not None and not df_proc.empty:
+
+            sub_proc = df_proc[
+                (df_proc["Fecha"] >= fi) &
+                (df_proc["Fecha"] <= ff)
+            ]
+
+            medias = sub_proc.mean(numeric_only=True)
+
+        else:
+            medias = pd.Series()
+
+        fila = {
+            "Cesta_id": i + 1,
+            "Fecha_ini": fi,
+            "Fecha_fin": ff,
+            "Dias": cesta["Dias"],
+            "Especies": ", ".join(cesta["Especies"]),
+            "Segmento": seg["Segmento"],
+            "Estado": seg["estado_diag"],
+            "Velocidad": seg["Velocidad experimental"]
+        }
+
+        # añadir variables proceso
+        if isinstance(medias, pd.Series):
+            for k, v in medias.items():
+                fila[k] = v
+
+        resultados.append(fila)
+
+    if resultados:
+        return pd.DataFrame(resultados)
+
+    return pd.DataFrame()
+
+def ranking_cestas(df_cestas):
+
+    if df_cestas.empty:
+        return pd.DataFrame()
+
+    df_rank = (
+        df_cestas.groupby("Especies")
+        .agg(
+            num_veces=("Cesta_id", "count"),
+            dias_totales=("Dias", "sum"),
+            vel_media=("Velocidad", "mean")
+        )
+        .sort_values("num_veces", ascending=False)
+        .reset_index()
+    )
+
+    return df_rank
+
 
 def calcular_calidad_segmento(df_filtrado, seg):
 
@@ -3766,6 +3875,36 @@ with tabs[3]:
     )
     
     st.plotly_chart(fig_arriba, use_container_width=True)
+    st.markdown("## 🛢️ Análisis por cestas de crudo")
+
+    if uploaded_crudos is not None:
+    
+        hojas = leer_archivo(uploaded_crudos)
+        hoja = list(hojas.keys())[0]
+        df_crudos = hojas[hoja]
+    
+        detalle_crudos = procesar_crudos(df_crudos)
+    
+        cestas = construir_cestas_crudo(detalle_crudos)
+    
+        df_cestas = analizar_cestas(
+            cestas,
+            df_validos,
+            st.session_state.get("df_proc")
+        )
+    
+        if not df_cestas.empty:
+    
+            st.subheader("Cestas detectadas")
+            st.dataframe(df_cestas)
+    
+            df_rank = ranking_cestas(df_cestas)
+    
+            st.subheader("Ranking de cestas")
+            st.dataframe(df_rank)
+    
+        else:
+            st.info("No se pudieron generar cestas")
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
 
