@@ -1189,8 +1189,161 @@ def aplicar_segmentacion_referencia(
             })
 
     return sorted(nuevos_segmentos, key=lambda x: x["fecha_ini"])
+def analisis_porcentaje_crudos_top_cestas(df_cestas, detalle_crudos):
 
+    resultados = []
 
+    for estado in ["ENCIMA", "DEBAJO", "DENTRO"]:
+
+        sub_estado = df_cestas[df_cestas["Estado"] == estado]
+
+        if sub_estado.empty:
+            continue
+
+        # Top 5 cestas
+        top_cestas = (
+            sub_estado["Especies"]
+            .value_counts()
+            .head(5)
+            .index
+        )
+
+        for cesta in top_cestas:
+
+            sub_cesta = sub_estado[sub_estado["Especies"] == cesta]
+
+            porcentajes = []
+
+            for _, row in sub_cesta.iterrows():
+
+                fi = row["Fecha_ini"]
+                ff = row["Fecha_fin"]
+
+                sub = detalle_crudos[
+                    (detalle_crudos["Fecha"] >= fi) &
+                    (detalle_crudos["Fecha"] <= ff)
+                ]
+
+                if sub.empty:
+                    continue
+
+                suma = (
+                    sub.groupby("Especie")["Porcentaje"]
+                    .sum()
+                )
+
+                total = suma.sum()
+
+                if total == 0:
+                    continue
+
+                pct = (suma / total * 100).to_dict()
+
+                porcentajes.append(pct)
+
+            # promedio de porcentajes
+            if porcentajes:
+
+                df_pct = pd.DataFrame(porcentajes).fillna(0)
+
+                media_pct = df_pct.mean()
+
+                for crudo, val in media_pct.items():
+
+                    resultados.append({
+                        "Estado": estado,
+                        "Cesta": cesta,
+                        "Crudo": crudo,
+                        "% promedio": val
+                    })
+
+    return pd.DataFrame(resultados)
+def enriquecer_cestas_con_proceso(df_cestas, vars_proceso):
+
+    if df_cestas.empty:
+        return pd.DataFrame()
+
+    filas = []
+
+    for cesta in df_cestas["Especies"].unique():
+
+        sub = df_cestas[df_cestas["Especies"] == cesta]
+
+        fila = {
+            "Cesta": cesta,
+            "num_veces": len(sub),
+            "dias_totales": sub["Dias"].sum(),
+            "vel_media": sub["Velocidad"].mean()
+        }
+
+        for var in vars_proceso:
+
+            if var not in sub.columns:
+                continue
+
+            vals = pd.to_numeric(sub[var], errors="coerce").dropna()
+
+            if len(vals) > 0:
+                fila[f"{var}_mean"] = vals.mean()
+                fila[f"{var}_std"] = vals.std()
+
+        filas.append(fila)
+
+    return pd.DataFrame(filas)
+
+from scipy.stats import spearmanr
+
+def analizar_variables_por_cesta_simple(df_cestas, vars_proceso):
+
+    resultados = []
+
+    if df_cestas.empty:
+        return pd.DataFrame()
+
+    for cesta in df_cestas["Especies"].unique():
+
+        sub = df_cestas[df_cestas["Especies"] == cesta]
+
+        if len(sub) < 3:
+            continue
+
+        for var in vars_proceso:
+
+            if var not in sub.columns:
+                continue
+
+            x = pd.to_numeric(sub[var], errors="coerce")
+            y = pd.to_numeric(sub["Velocidad"], errors="coerce")
+
+            mask = (~x.isna()) & (~y.isna())
+
+            x = x[mask]
+            y = y[mask]
+
+            if len(x) < 3 or x.std() == 0:
+                continue
+
+            try:
+                corr, _ = spearmanr(x, y)
+
+                resultados.append({
+                    "Cesta": cesta,
+                    "Variable": var,
+                    "Importancia": abs(corr),
+                    "Correlacion": corr,
+                    "n_puntos": len(x)
+                })
+
+            except:
+                continue
+
+    if not resultados:
+        return pd.DataFrame()
+
+    return pd.DataFrame(resultados).sort_values(
+        ["Cesta", "Importancia"],
+        ascending=[True, False]
+    )
 
 def make_safe_name(text: str) -> str:
     import re, unicodedata
@@ -4012,10 +4165,8 @@ with tabs[3]:
     
         else:
             st.info("No se pudieron generar cestas")
-    st.markdown("## 🧠 Análisis avanzado de cestas")
 
     if not df_cestas.empty:
-    
         # =========================================
         # 1. Ranking por estado
         # =========================================
@@ -4025,28 +4176,44 @@ with tabs[3]:
     
         st.dataframe(df_rank_estado)
     
-        # =========================================
-        # 2. Machine Learning
-        # =========================================
-        st.subheader("Variables que explican cada cesta (Random Forest)")
+    st.markdown("## 🔬 Análisis avanzado de cestas (robusto con pocos datos)")
     
-        df_ml = analizar_ml_por_cesta(
-            df_cestas,
-            st.session_state.get("vars_proceso", [])
-        )
+    # =========================
+    # MODELO SIMPLE (Spearman)
+    # =========================
+    df_ml_simple = analizar_variables_por_cesta_simple(
+        df_cestas,
+        st.session_state.get("vars_proceso", [])
+    )
     
-        if not df_ml.empty:
+    if not df_ml_simple.empty:
+        st.subheader("Variables que más influyen por cesta")
+        st.dataframe(df_ml_simple)
     
-            st.dataframe(df_ml)
+    # =========================
+    # ENRIQUECER RANKING
+    # =========================
+    df_cestas_proc = enriquecer_cestas_con_proceso(
+        df_cestas,
+        st.session_state.get("vars_proceso", [])
+    )
     
-            st.subheader("Top variables por cesta")
+    st.subheader("Ranking enriquecido de cestas")
+    st.dataframe(df_cestas_proc)
     
-            df_top = resumen_top_variables(df_ml, top_n=3)
+    # =========================
+    # % CRUDOS POR TIPO
+    # =========================
+    df_pct = analisis_porcentaje_crudos_top_cestas(
+        df_cestas,
+        detalle_crudos
+    )
     
-            st.dataframe(df_top)
+    if not df_pct.empty:
     
-        else:
-            st.info("No hay suficientes datos para ML por cesta")
+        st.subheader("Composición promedio por tipo de desviación")
+    
+        st.dataframe(df_pct)
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
 
