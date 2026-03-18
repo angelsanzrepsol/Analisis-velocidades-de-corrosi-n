@@ -428,12 +428,28 @@ def procesar_crudos(df):
     # -----------------------------
     # Detectar columnas COMP y %
     # -----------------------------
-    comp_cols = [c for c in df.columns if "comp" in c.lower() and "porc" not in c.lower()]
-    porc_cols = [c for c in df.columns if "porccomp" in c.lower()]
+    def es_carga_comb(col):
+        c = col.lower()
+        return (
+            "carga" in c and
+            ("comb" in c or "combustible" in c)
+        )
 
+    comp_cols = [
+        c for c in df.columns
+        if "comp" in c.lower()
+        and "porc" not in c.lower()
+        and es_carga_comb(c)
+    ]
+    
+    porc_cols = [
+        c for c in df.columns
+        if "porccomp" in c.lower()
+        and es_carga_comb(c)
+    ]
     comp_cols = sorted(comp_cols)
     porc_cols = sorted(porc_cols)
-
+    
     if not comp_cols or not porc_cols:
         raise ValueError("No se detectaron columnas COMP / PORCCOMP")
 
