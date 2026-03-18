@@ -2232,6 +2232,26 @@ def graficar_segmentos(df, titulo):
     )
 
     st.plotly_chart(fig, use_container_width=True)
+    
+def resumen_especie(df_result):
+
+    if df_result.empty:
+        return pd.DataFrame()
+
+    resumen = (
+        df_result.groupby("Cesta")
+        .agg(
+            num_veces=("Cesta", "count"),
+            dias_totales=("Dias", "sum"),
+            pct_medio=("% especie", "mean"),
+            vel_media=("Velocidad", "mean")
+        )
+        .sort_values("num_veces", ascending=False)
+        .reset_index()
+    )
+
+    return resumen
+
 def extraer_segmentos_validos_wrapper(df_filtrado, y_suave, segmentos_raw, df_proc, vars_proceso, min_dias_val):
     fn = safe_get("extraer_segmentos_validos")
     if fn is not None:
@@ -2241,6 +2261,65 @@ def extraer_segmentos_validos_wrapper(df_filtrado, y_suave, segmentos_raw, df_pr
             pass
     return extraer_segmentos_validos_fallback(df_filtrado, y_suave, segmentos_raw, df_proc, vars_proceso, min_dias=min_dias_val)
 
+def buscar_especie_en_cestas(df_cestas, detalle_crudos, especie):
+
+    resultados = []
+
+    for _, cesta in df_cestas.iterrows():
+
+        especies_cesta = cesta["Especies"]
+
+        # comprobar si está la especie
+        if especie not in especies_cesta:
+            continue
+
+        fi = pd.to_datetime(cesta["Fecha_ini"])
+        ff = pd.to_datetime(cesta["Fecha_fin"])
+
+        # datos crudos en ese intervalo
+        sub = detalle_crudos[
+            (detalle_crudos["Fecha"] >= fi) &
+            (detalle_crudos["Fecha"] <= ff)
+        ]
+
+        if sub.empty:
+            continue
+
+        suma = (
+            sub.groupby("Especie")["Porcentaje"]
+            .sum()
+        )
+
+        total = suma.sum()
+
+        if total == 0:
+            continue
+
+        pct = (suma / total * 100)
+
+        pct_especie = pct.get(especie, 0)
+
+        fila = {
+            "Cesta": ", ".join(especies_cesta),
+            "Fecha_ini": fi,
+            "Fecha_fin": ff,
+            "Dias": cesta["Dias"],
+            "Estado": cesta["Estado"],
+            "% especie": pct_especie,
+            "Velocidad": cesta["Velocidad"]
+        }
+
+        # añadir variables de proceso si existen
+        for col in cesta.index:
+            if col not in fila:
+                fila[col] = cesta[col]
+
+        resultados.append(fila)
+
+    if resultados:
+        return pd.DataFrame(resultados)
+
+    return pd.DataFrame()
 def dibujar_grafica_completa_wrapper(df_filtrado, y_suave, segmentos_validos, descartados, segmentos_eliminados_idx, titulo, figsize, show=False):
     fn = safe_get("dibujar_grafica_completa")
     if fn is not None:
@@ -4212,7 +4291,38 @@ with tabs[3]:
     if not df_pct.empty:
     
         st.subheader("Composición promedio por tipo de desviación")
+        
+    st.markdown("## 🔎 Buscador por especie de crudo")
     
+    if not df_cestas.empty and "detalle_crudos" in locals():
+    
+        # obtener especies disponibles
+        especies = sorted(detalle_crudos["Especie"].dropna().unique())
+    
+        especie_sel = st.selectbox(
+            "Selecciona especie de crudo",
+            especies
+        )
+    
+        if especie_sel:
+    
+            df_result = buscar_especie_en_cestas(
+                df_cestas,
+                detalle_crudos,
+                especie_sel
+            )
+    
+            if not df_result.empty:
+    
+                st.subheader(f"Cestas donde aparece {especie_sel}")
+                st.dataframe(df_result)
+    
+                st.subheader("Resumen por cesta")
+                df_resumen = resumen_especie(df_result)
+                st.dataframe(df_resumen)
+    
+            else:
+                st.warning("La especie no aparece en ninguna cesta válida")
         st.dataframe(df_pct)
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
