@@ -97,6 +97,64 @@ def dividir_todos_segmentos(
             nuevos.append(seg)
 
     return sorted(nuevos, key=lambda x: x["fecha_ini"])
+
+import plotly.graph_objects as go
+
+def graficar_especie_vs_corrosion(df_result, especie):
+
+    if df_result.empty:
+        return None
+
+    df_plot = df_result.dropna(subset=["% especie", "Velocidad"])
+
+    if df_plot.empty:
+        return None
+
+    fig = go.Figure()
+
+    # puntos
+    fig.add_trace(go.Scatter(
+        x=df_plot["% especie"],
+        y=df_plot["Velocidad"],
+        mode="markers",
+        name=especie,
+        marker=dict(size=10)
+    ))
+
+    # regresión
+    x_reg, y_reg, r2 = calcular_regresion(
+        df_plot["% especie"],
+        df_plot["Velocidad"]
+    )
+
+    if x_reg is not None:
+
+        fig.add_trace(go.Scatter(
+            x=x_reg,
+            y=y_reg,
+            mode="lines",
+            name="Tendencia"
+        ))
+
+        if r2 is not None:
+            fig.add_annotation(
+                x=0.05,
+                y=0.95,
+                xref="paper",
+                yref="paper",
+                text=f"R² = {r2:.3f}",
+                showarrow=False
+            )
+
+    fig.update_layout(
+        title=f"{especie}: % vs velocidad de corrosión",
+        xaxis_title="% en la cesta",
+        yaxis_title="Velocidad corrosión (mm/año)",
+        height=500
+    )
+
+    return fig
+
 def construir_cestas_crudo(detalle_crudos):
 
     if detalle_crudos.empty:
@@ -4257,17 +4315,6 @@ with tabs[3]:
     
     st.markdown("## 🔬 Análisis avanzado de cestas (robusto con pocos datos)")
     
-    # =========================
-    # MODELO SIMPLE (Spearman)
-    # =========================
-    df_ml_simple = analizar_variables_por_cesta_simple(
-        df_cestas,
-        st.session_state.get("vars_proceso", [])
-    )
-    
-    if not df_ml_simple.empty:
-        st.subheader("Variables que más influyen por cesta")
-        st.dataframe(df_ml_simple)
     
     # =========================
     # ENRIQUECER RANKING
@@ -4324,6 +4371,17 @@ with tabs[3]:
             else:
                 st.warning("La especie no aparece en ninguna cesta válida")
         st.dataframe(df_pct)
+        st.subheader("Relación % crudo vs corrosión")
+        
+        fig = graficar_especie_vs_corrosion(
+            df_result,
+            especie_sel
+        )
+        
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No hay datos suficientes para graficar")
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
 
