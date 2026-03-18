@@ -789,7 +789,114 @@ def analizar_crudos_agresividad(df_master):
         "Score agresividad",
         ascending=False
     )
+def ranking_cestas_por_estado(df_cestas):
 
+    if df_cestas.empty:
+        return pd.DataFrame()
+
+    df_rank = (
+        df_cestas
+        .groupby(["Especies", "Estado"])
+        .agg(
+            num_veces=("Cesta_id", "count"),
+            dias_totales=("Dias", "sum"),
+            vel_media=("Velocidad", "mean")
+        )
+        .reset_index()
+    )
+
+    # Pivot para verlo tipo matriz
+    df_pivot = df_rank.pivot_table(
+        index="Especies",
+        columns="Estado",
+        values="num_veces",
+        fill_value=0
+    )
+
+    df_pivot["TOTAL"] = df_pivot.sum(axis=1)
+
+    return df_pivot.sort_values("TOTAL", ascending=False)
+from sklearn.ensemble import RandomForestRegressor
+
+def analizar_ml_por_cesta(df_cestas, vars_proceso):
+
+    resultados = []
+
+    if df_cestas.empty:
+        return pd.DataFrame()
+
+    cestas_unicas = df_cestas["Especies"].unique()
+
+    for cesta in cestas_unicas:
+
+        sub = df_cestas[df_cestas["Especies"] == cesta].copy()
+
+        if len(sub) < 5:
+            continue
+
+        # variables disponibles
+        vars_validas = [v for v in vars_proceso if v in sub.columns]
+
+        if not vars_validas:
+            continue
+
+        X = sub[vars_validas].copy()
+        y = sub["Velocidad"].copy()
+
+        # limpiar
+        X = X.apply(pd.to_numeric, errors="coerce")
+        y = pd.to_numeric(y, errors="coerce")
+
+        mask = (~X.isna().any(axis=1)) & (~y.isna())
+        X = X[mask]
+        y = y[mask]
+
+        if len(X) < 5:
+            continue
+
+        try:
+            model = RandomForestRegressor(
+                n_estimators=200,
+                max_depth=5,
+                random_state=42
+            )
+
+            model.fit(X, y)
+
+            importancias = model.feature_importances_
+
+            for var, imp in zip(vars_validas, importancias):
+
+                resultados.append({
+                    "Cesta": cesta,
+                    "Variable": var,
+                    "Importancia": imp
+                })
+
+        except Exception:
+            continue
+
+    if not resultados:
+        return pd.DataFrame()
+
+    df_imp = pd.DataFrame(resultados)
+
+    return df_imp.sort_values(
+        ["Cesta", "Importancia"],
+        ascending=[True, False]
+    )
+
+def resumen_top_variables(df_imp, top_n=3):
+
+    if df_imp.empty:
+        return pd.DataFrame()
+
+    return (
+        df_imp
+        .groupby("Cesta")
+        .head(top_n)
+        .reset_index(drop=True)
+    )
 def cargar_proceso_primera_hoja_limpio(path_excel):
 
     # Leer primera hoja completa
@@ -3905,6 +4012,41 @@ with tabs[3]:
     
         else:
             st.info("No se pudieron generar cestas")
+    st.markdown("## 🧠 Análisis avanzado de cestas")
+
+    if not df_cestas.empty:
+    
+        # =========================================
+        # 1. Ranking por estado
+        # =========================================
+        st.subheader("Ranking de cestas por comportamiento")
+    
+        df_rank_estado = ranking_cestas_por_estado(df_cestas)
+    
+        st.dataframe(df_rank_estado)
+    
+        # =========================================
+        # 2. Machine Learning
+        # =========================================
+        st.subheader("Variables que explican cada cesta (Random Forest)")
+    
+        df_ml = analizar_ml_por_cesta(
+            df_cestas,
+            st.session_state.get("vars_proceso", [])
+        )
+    
+        if not df_ml.empty:
+    
+            st.dataframe(df_ml)
+    
+            st.subheader("Top variables por cesta")
+    
+            df_top = resumen_top_variables(df_ml, top_n=3)
+    
+            st.dataframe(df_top)
+    
+        else:
+            st.info("No hay suficientes datos para ML por cesta")
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[4]:
 
