@@ -248,7 +248,7 @@ def entrenar_modelos_ml(df, vars_proceso):
     vars_validas = [v for v in vars_proceso if v in df.columns]
 
     if not vars_validas:
-        return {}
+        return {}, None
 
     X = df[vars_validas].apply(pd.to_numeric, errors="coerce")
     y = pd.to_numeric(df["Velocidad experimental"], errors="coerce")
@@ -258,7 +258,7 @@ def entrenar_modelos_ml(df, vars_proceso):
     y = y[mask]
 
     if len(X) < 10:
-        return {}
+        return {}, None 
 
     # =========================
     # RANDOM FOREST
@@ -4806,9 +4806,9 @@ with tabs[4]:
         vars_modelo
     )
     if not modelos:
-        st.warning("No hay suficientes datos para ML")
+        st.warning("No hay suficientes datos para entrenar el modelo")
         st.stop()
-
+    
     mejor_modelo = None
     mejor_r2 = -999
 
