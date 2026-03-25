@@ -2438,6 +2438,37 @@ def dibujar_grafica_completa_fallback(df_filtrado, y_suave, segmentos_validos, d
     plt.tight_layout()
     return fig, ax
 
+def construir_dataset_ml_hibrido(df_master):
+
+    if df_master.empty:
+        return pd.DataFrame()
+
+    # pivot crudos → columnas
+    df_pivot = df_master.pivot_table(
+        index=["Sonda", "Hoja", "Segmento"],
+        columns="Crudo",
+        values="Porcentaje_promedio",
+        fill_value=0
+    ).reset_index()
+
+    # velocidad + proceso (una fila por segmento)
+    df_base = (
+        df_master
+        .groupby(["Sonda", "Hoja", "Segmento"])
+        .first()
+        .reset_index()
+    )
+
+    # merge
+    df_final = pd.merge(
+        df_base,
+        df_pivot,
+        on=["Sonda", "Hoja", "Segmento"],
+        how="left"
+    )
+
+    return df_final
+
 # Wrappers prefieren funciones del usuario
 def detectar_segmentos_wrapper(df, umbral_factor_val, umbral_val):
     fn = safe_get("detectar_segmentos")
@@ -4689,76 +4720,161 @@ with tabs[4]:
     
     st.dataframe(df_analisis)
     # =========================
-    # 🟢 MODELOS ML
+    # 🟢 MODELOS ML (PROCESO + CRUDOS)
     # =========================
-
+    
     st.subheader("Modelo de datos (Machine Learning)")
-
+    
+    # 🔹 1. DATASET HÍBRIDO (usa pivot de crudos)
+    df_master = st.session_state.get("df_master_global")
+    
+    if df_master is None or df_master.empty:
+        st.warning("No hay dataset de crudos")
+        st.stop()
+    
+    df_ml = construir_dataset_ml_hibrido(df_master)
+    
+    df_ml = df_ml.dropna(subset=["Velocidad_corr"])
+    
+    # 🔹 2. VARIABLES (PROCESO + CRUDOS)
+    vars_proceso = st.session_state.get("vars_proceso", [])
+    
+    cols_excluir = [
+        "Sonda", "Hoja", "Segmento",
+        "Velocidad_corr", "Fecha_inicio", "Fecha_fin"
+    ]
+    
+    vars_crudos = [
+        c for c in df_ml.columns
+        if c not in cols_excluir and c not in vars_proceso
+    ]
+    
+    X = df_ml[vars_proceso + vars_crudos].apply(pd.to_numeric, errors="coerce")
+    y = pd.to_numeric(df_ml["Velocidad_corr"], errors="coerce")
+    
+    mask = (~X.isna().any(axis=1)) & (~y.isna())
+    
+    X = X[mask]
+    y = y[mask]
+    
+    df_ml = df_ml.loc[mask].reset_index(drop=True)
+    
+    # 🔹 3. ENTRENAR MODELOS
     modelos, y_real = entrenar_modelos_ml(
-        df_comp,
-        st.session_state.get("vars_proceso", [])
+        pd.concat([X, y.rename("Velocidad experimental")], axis=1),
+        X.columns.tolist()
     )
-
+    
     if not modelos:
         st.warning("No hay suficientes datos para ML")
         st.stop()
-
+    
+    # 🔹 4. VISUALIZACIÓN MODELOS
     mejor_modelo = None
     mejor_r2 = -999
-
+    
     for nombre, data in modelos.items():
-
+    
         st.markdown(f"### {nombre} (R² = {data['r2']:.3f})")
-
+    
         fig = grafica_modelo_vs_real(
             y_real,
             data["pred"],
             nombre,
             tolerancia=0
         )
-
+    
         st.plotly_chart(fig, use_container_width=True)
-
+    
         if data["r2"] > mejor_r2:
             mejor_r2 = data["r2"]
             mejor_modelo = (nombre, data)
-        
+    
     # =========================
     # 🟣 MEJOR MODELO
     # =========================
-
+    
     st.subheader(f"Mejor modelo: {mejor_modelo[0]} (R²={mejor_r2:.3f})")
-
+    
     tol_ml = st.slider(
         "Tolerancia modelo ML",
         0.0, 1.0, 0.05, 0.01,
         key="tol_ml"
     )
-
+    
     fig_best = grafica_modelo_vs_real(
         y_real,
         mejor_modelo[1]["pred"],
         "Mejor modelo vs real",
         tol_ml
     )
-
-    st.plotly_chart(fig_best, use_container_width=True)
-    st.markdown("### Análisis por cestas (ML)")
-
-    df_ml = pd.DataFrame({
-        "Velocidad experimental": y_real,
-        "Velocidad predicha": mejor_modelo[1]["pred"]
-    })
     
-    df_ml["Estado"] = (
+    st.plotly_chart(fig_best, use_container_width=True)
+    
+    # =========================
+    # 🔥 TRAZABILIDAD SEGMENTO
+    # =========================
+    
+    df_ml["Velocidad experimental"] = y_real
+    df_ml["Velocidad predicha"] = mejor_modelo[1]["pred"]
+    
+    df_ml["estado_diag"] = (
         df_ml["Velocidad experimental"]
         - df_ml["Velocidad predicha"]
     ).apply(
         lambda x:
-        "ENCIMA" if x > tol_ml
-        else "DEBAJO" if x < -tol_ml
-        else "DENTRO"
+            "ENCIMA" if x > tol_ml
+            else "DEBAJO" if x < -tol_ml
+            else "DENTRO"
     )
+    
+    # =========================
+    # 🟡 ANÁLISIS POR CESTAS
+    # =========================
+    
+    st.markdown("### Análisis por cestas (ML)")
+    
+    detalle_crudos = procesar_crudos(df_crudos)
+    
+    cestas = construir_cestas_crudo(detalle_crudos)
+    
+    df_cestas = analizar_cestas(
+        cestas,
+        df_ml,
+        st.session_state.get("df_proc")
+    )
+    
+    st.dataframe(df_cestas)
+    
+    # =========================
+    # 🔥 ANÁLISIS DESVIACIÓN POR CRUDO
+    # =========================
+    
+    df_analisis = analisis_desviacion_por_cesta(
+        df_cestas,
+        detalle_crudos
+    )
+    
+    st.subheader("Desviación por crudo")
+    
+    st.dataframe(df_analisis)
+    
+    # =========================
+    # 🚨 CRUDOS QUE MÁS ROMPEN EL MODELO
+    # =========================
+    
+    st.subheader("Crudos que más desvían el modelo")
+    
+    if "ENCIMA" in df_analisis.columns:
+    
+        df_top = (
+            df_analisis.groupby("Crudo")["ENCIMA"]
+            .sum()
+            .sort_values(ascending=False)
+            .reset_index()
+        )
+    
+        st.dataframe(df_top)
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[5]:
 
