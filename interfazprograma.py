@@ -135,7 +135,29 @@ def exportar_configuracion_json():
 
     return json.dumps(config_safe, indent=4)
 from sklearn.linear_model import LinearRegression
+def expandir_segmentos_a_diario(df):
 
+    filas = []
+
+    for _, row in df.iterrows():
+
+        if pd.isna(row["Fecha_inicio"]) or pd.isna(row["Fecha_fin"]):
+            continue
+
+        fechas = pd.date_range(
+            start=row["Fecha_inicio"],
+            end=row["Fecha_fin"],
+            freq="D"
+        )
+
+        for f in fechas:
+            nueva = row.copy()
+            nueva["Fecha"] = f
+            filas.append(nueva)
+
+    df_out = pd.DataFrame(filas)
+
+    return df_out
 def dividir_todos_segmentos(
         df_filtrado,
         segmentos,
@@ -4743,8 +4765,33 @@ with tabs[4]:
         st.warning("No hay dataset de crudos")
         st.stop()
     
+    # =========================
+    # 🔹 DATASET ML
+    # =========================
+    
+    df_master = st.session_state.get("df_master_global")
+    
+    if df_master is None or df_master.empty:
+        st.warning("No hay dataset de crudos")
+        st.stop()
+    
     df_ml = construir_dataset_ml_hibrido(df_master)
     
+    # 🔥 EXPANDIR A DIARIO (CLAVE)
+    df_ml = expandir_segmentos_a_diario(df_ml)
+    
+    # =========================
+    # 🔹 MERGE CON PROCESO
+    # =========================
+    
+    df_proc = st.session_state.get("df_proc")
+    
+    if df_proc is not None and "Fecha" in df_proc.columns:
+        df_ml["Fecha"] = pd.to_datetime(df_ml["Fecha"], errors="coerce")
+        df_proc["Fecha"] = pd.to_datetime(df_proc["Fecha"], errors="coerce")
+    
+        df_ml = df_ml.merge(df_proc, on="Fecha", how="left")
+    df_ml = expandir_segmentos_a_diario(df_ml)
     df_ml = df_ml.dropna(subset=["Velocidad_corr"])
     
     # 🔹 2. VARIABLES (PROCESO + CRUDOS)
