@@ -4772,7 +4772,7 @@ with tabs[4]:
                 tolerancia=tol_ml_global
             )
     
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True,key=f"ml_{nombre}")
     
             if data["r2"] > mejor_r2:
                 mejor_r2 = data["r2"]
@@ -4855,7 +4855,7 @@ with tabs[4]:
             title="Distribución de segmentos por modelo"
         )
         
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True,key="resumen_modelos")
         # =========================
         # 🟣 MEJOR MODELO
         # =========================
@@ -4875,7 +4875,7 @@ with tabs[4]:
             tol_ml
         )
     
-        st.plotly_chart(fig_best, use_container_width=True)
+        st.plotly_chart(fig_best, use_container_width=True, key="mejor_modelo")
         # IMPORTANCIA MPA
         imp_mpa = importancia_mpa(df_comp)
         
