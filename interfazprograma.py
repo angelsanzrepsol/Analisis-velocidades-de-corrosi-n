@@ -166,84 +166,95 @@ def dividir_todos_segmentos(
     return sorted(nuevos, key=lambda x: x["fecha_ini"])
 
 import plotly.graph_objects as go
-def entrenar_modelos_ml(df, vars_proceso):
+def entrenar_modelos_ml(df, features):
 
-    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.model_selection import train_test_split
     from sklearn.metrics import r2_score
+    from sklearn.ensemble import RandomForestRegressor
 
-    resultados = {}
+    try:
+        from xgboost import XGBRegressor
+    except:
+        XGBRegressor = None
 
-    df = df.copy()
+    try:
+        from catboost import CatBoostRegressor
+    except:
+        CatBoostRegressor = None
 
-    # variables válidas
-    vars_validas = [v for v in vars_proceso if v in df.columns]
+    # =========================
+    # 🔹 TARGET
+    # =========================
+    if "Velocidad_corr" not in df.columns:
+        raise ValueError("Falta columna Velocidad_corr en dataset ML")
 
-    if not vars_validas:
-        return {}
-
-    X = df[vars_validas].apply(pd.to_numeric, errors="coerce")
     y = pd.to_numeric(df["Velocidad_corr"], errors="coerce")
+    X = df[features].apply(pd.to_numeric, errors="coerce")
 
     mask = (~X.isna().any(axis=1)) & (~y.isna())
     X = X[mask]
     y = y[mask]
 
     if len(X) < 10:
-        return modelos, y_real
+        return {}, None
 
     # =========================
-    # RANDOM FOREST
+    # 🔹 SPLIT
     # =========================
-    try:
-        rf = RandomForestRegressor(n_estimators=300, random_state=42)
-        rf.fit(X, y)
-        pred_rf = rf.predict(X)
-        resultados["Random Forest"] = {
-            "modelo": rf,
-            "pred": pred_rf,
-            "r2": r2_score(y, pred_rf)
-        }
-    except:
-        pass
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    modelos = {}
 
     # =========================
-    # XGBOOST
+    # 🌳 RANDOM FOREST
     # =========================
-    try:
-        from xgboost import XGBRegressor
+    rf = RandomForestRegressor(n_estimators=200, random_state=42)
+    rf.fit(X_train, y_train)
 
-        xgb = XGBRegressor(n_estimators=300, max_depth=4)
-        xgb.fit(X, y)
-        pred_xgb = xgb.predict(X)
+    pred_rf = rf.predict(X_test)
 
-        resultados["XGBoost"] = {
+    modelos["Random Forest"] = {
+        "modelo": rf,
+        "pred": pred_rf,
+        "r2": r2_score(y_test, pred_rf)
+    }
+
+    # =========================
+    # ⚡ XGBOOST
+    # =========================
+    if XGBRegressor:
+        xgb = XGBRegressor(n_estimators=200, random_state=42)
+        xgb.fit(X_train, y_train)
+
+        pred_xgb = xgb.predict(X_test)
+
+        modelos["XGBoost"] = {
             "modelo": xgb,
             "pred": pred_xgb,
-            "r2": r2_score(y, pred_xgb)
+            "r2": r2_score(y_test, pred_xgb)
         }
-    except:
-        pass
 
     # =========================
-    # CATBOOST
+    # 🐱 CATBOOST
     # =========================
-    try:
-        from catboost import CatBoostRegressor
-
+    if CatBoostRegressor:
         cat = CatBoostRegressor(verbose=0)
-        cat.fit(X, y)
-        pred_cat = cat.predict(X)
+        cat.fit(X_train, y_train)
 
-        resultados["CatBoost"] = {
+        pred_cat = cat.predict(X_test)
+
+        modelos["CatBoost"] = {
             "modelo": cat,
             "pred": pred_cat,
-            "r2": r2_score(y, pred_cat)
+            "r2": r2_score(y_test, pred_cat)
         }
-    except:
-        pass
 
-    return resultados, y
-
+    # =========================
+    # 🔹 OUTPUT
+    # =========================
+    return modelos, y_test
 def grafica_modelo_vs_real(y_real, y_pred, titulo, tolerancia):
 
     import plotly.graph_objects as go
