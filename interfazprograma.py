@@ -4719,51 +4719,52 @@ with tabs[4]:
         if k in sel_sondas
     }
 
-    # 1️⃣ construir tabla base
-    if modo_modelo == "Por segmentos":
-
-        df_modelo = df_comp.copy()
-        df_modelo["Velocidad experimental"] = df_modelo["Media velocidades"]
+    # =========================================
+    # 1️⃣ CONSTRUIR DATASET BASE (df_comp SIEMPRE)
+    # =========================================
     
-    else:
+    df_comp = construir_tabla_segmentos_comparativa(
+        processed_filtrado,
+        st.session_state.get("df_mpa"),
+        material_sel
+    )
     
-        detalle_crudos = procesar_crudos(df_crudos)
-    
-        df_modelo = construir_dataset_diario_crudo(
-            detalle_crudos,
-            processed_filtrado,
-            st.session_state.get("df_proc")
-        )
-    
-        df_modelo["Velocidad experimental"] = df_modelo["Velocidad_corr"]
-        
-    # 2️⃣ aplicar filtro de error (CLAVE)
+    # aplicar filtro
     processed_filtrado = aplicar_umbral_error_segmentos(
         processed_filtrado,
         df_comp,
         st.session_state.get("umbral_error_segmento", 30.0)
     )
     
-    # 3️⃣ reconstruir tabla ya filtrada
+    # reconstruir tras filtro
+    df_comp = construir_tabla_segmentos_comparativa(
+        processed_filtrado,
+        st.session_state.get("df_mpa"),
+        material_sel
+    )
+    
+    df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
+    
+    # =========================================
+    # 2️⃣ CONSTRUIR DATASET SEGÚN MODO
+    # =========================================
+    
     if modo_modelo == "Por segmentos":
-
+    
         df_modelo = df_comp.copy()
-        df_modelo["Velocidad experimental"] = df_modelo["Media velocidades"]
     
     else:
     
-        detalle_crudos = procesar_crudos(df_crudos)
+        if "df_master_global" not in st.session_state:
+            st.warning("Primero carga crudos en la pestaña correspondiente")
+            st.stop()
     
-        df_modelo = construir_dataset_diario_crudo(
-            detalle_crudos,
-            processed_filtrado,
-            st.session_state.get("df_proc")
-        )
+        df_master = st.session_state["df_master_global"]
+    
+        # usamos dataset ya construido (MEJOR que recalcular)
+        df_modelo = df_master.copy()
     
         df_modelo["Velocidad experimental"] = df_modelo["Velocidad_corr"]
-    
-    # 4️⃣ variable objetivo
-    df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
 
     # =========================
     # 🔵 MODELO MPA
