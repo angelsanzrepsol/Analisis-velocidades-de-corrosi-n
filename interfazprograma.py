@@ -23,75 +23,6 @@ import io
 import re
 
 import json
-
-def construir_dataset_diario_crudo(detalle_crudos, processed_sheets, df_proc):
-
-    filas = []
-
-    for key, data in processed_sheets.items():
-
-        if not data.get("saved"):
-            continue
-
-        for i, seg in enumerate(data["segmentos_validos"], start=1):
-
-            fi = pd.to_datetime(seg["fecha_ini"])
-            ff = pd.to_datetime(seg["fecha_fin"])
-
-            vel = seg.get("vel_abs")
-
-            # días del segmento
-            dias = pd.date_range(fi, ff, freq="D")
-
-            for dia in dias:
-
-                fila = {
-                    "Fecha": dia,
-                    "Velocidad_corr": vel,
-                    "Segmento": i
-                }
-
-                # =========================
-                # VARIABLES PROCESO (día real)
-                # =========================
-                if df_proc is not None and not df_proc.empty:
-
-                    sub = df_proc[df_proc["Fecha"] == dia]
-
-                    if not sub.empty:
-                        for col in df_proc.columns:
-                            if col != "Fecha":
-                                fila[col] = sub.iloc[0][col]
-
-                # =========================
-                # CRUDOS (composición ese día)
-                # =========================
-                sub_crudo = detalle_crudos[
-                    detalle_crudos["Fecha"] == dia
-                ]
-
-                if not sub_crudo.empty:
-
-                    suma = (
-                        sub_crudo.groupby("Especie")["Porcentaje"]
-                        .sum()
-                    )
-
-                    total = suma.sum()
-
-                    if total > 0:
-                        pct = (suma / total * 100)
-
-                        for especie, val in pct.items():
-                            fila[f"CRUDO_{especie}"] = val
-
-                filas.append(fila)
-
-    if filas:
-        return pd.DataFrame(filas)
-
-    return pd.DataFrame()
-
 def analisis_desviacion_por_cesta(
     df_cestas,
     detalle_crudos
@@ -248,7 +179,7 @@ def entrenar_modelos_ml(df, vars_proceso):
     vars_validas = [v for v in vars_proceso if v in df.columns]
 
     if not vars_validas:
-        return {}, None
+        return {}
 
     X = df[vars_validas].apply(pd.to_numeric, errors="coerce")
     y = pd.to_numeric(df["Velocidad experimental"], errors="coerce")
@@ -258,7 +189,7 @@ def entrenar_modelos_ml(df, vars_proceso):
     y = y[mask]
 
     if len(X) < 10:
-        return {}, None 
+        return {}
 
     # =========================
     # RANDOM FOREST
@@ -4689,11 +4620,7 @@ with tabs[3]:
 with tabs[4]:  
 
     st.header("Modelo predictivo")
-    modo_modelo = st.radio(
-        "Modo de modelado",
-        ["Por segmentos", "Por cestas de crudo"],
-        horizontal=True
-    )
+
     processed = st.session_state.get("processed_sheets", {})
 
     processed = {
@@ -4719,52 +4646,29 @@ with tabs[4]:
         if k in sel_sondas
     }
 
-    # =========================================
-    # 1️⃣ CONSTRUIR DATASET BASE (df_comp SIEMPRE)
-    # =========================================
-    
+    # 1️⃣ construir tabla base
     df_comp = construir_tabla_segmentos_comparativa(
         processed_filtrado,
         st.session_state.get("df_mpa"),
         material_sel
     )
     
-    # aplicar filtro
+    # 2️⃣ aplicar filtro de error (CLAVE)
     processed_filtrado = aplicar_umbral_error_segmentos(
         processed_filtrado,
         df_comp,
         st.session_state.get("umbral_error_segmento", 30.0)
     )
     
-    # reconstruir tras filtro
+    # 3️⃣ reconstruir tabla ya filtrada
     df_comp = construir_tabla_segmentos_comparativa(
         processed_filtrado,
         st.session_state.get("df_mpa"),
         material_sel
     )
     
+    # 4️⃣ variable objetivo
     df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
-    
-    # =========================================
-    # 2️⃣ CONSTRUIR DATASET SEGÚN MODO
-    # =========================================
-    
-    if modo_modelo == "Por segmentos":
-    
-        df_modelo = df_comp.copy()
-    
-    else:
-    
-        if "df_master_global" not in st.session_state:
-            st.warning("Primero carga crudos en la pestaña correspondiente")
-            st.stop()
-    
-        df_master = st.session_state["df_master_global"]
-    
-        # usamos dataset ya construido (MEJOR que recalcular)
-        df_modelo = df_master.copy()
-    
-        df_modelo["Velocidad experimental"] = df_modelo["Velocidad_corr"]
 
     # =========================
     # 🔵 MODELO MPA
@@ -4785,31 +4689,22 @@ with tabs[4]:
     )
     
     st.plotly_chart(fig_mpa, use_container_width=True)
+    
     # =========================
     # 🟢 MODELOS ML
     # =========================
-    
+
     st.subheader("Modelo de datos (Machine Learning)")
-    
-    # 🔥 VARIABLES DEL MODELO (CLAVE)
-    vars_modelo = [
-        c for c in df_modelo.columns
-        if c not in [
-            "Velocidad experimental",
-            "Velocidad_corr",
-            "Fecha",
-            "Segmento"
-        ]
-    ]
-    
+
     modelos, y_real = entrenar_modelos_ml(
-        df_modelo,
-        vars_modelo
+        df_comp,
+        st.session_state.get("vars_proceso", [])
     )
+
     if not modelos:
-        st.warning("No hay suficientes datos para entrenar el modelo")
+        st.warning("No hay suficientes datos para ML")
         st.stop()
-    
+
     mejor_modelo = None
     mejor_r2 = -999
 
