@@ -270,6 +270,27 @@ def entrenar_modelos_ml(df, vars_proceso):
 
     return resultados, y
 
+def clasificar_por_tolerancia(y_real, y_pred, tol):
+
+    df = pd.DataFrame({
+        "real": y_real,
+        "pred": y_pred
+    }).dropna()
+
+    df["delta"] = df["real"] - df["pred"]
+
+    def clasificar(x):
+        if x > tol:
+            return "ENCIMA"
+        elif x < -tol:
+            return "DEBAJO"
+        else:
+            return "DENTRO"
+
+    df["estado"] = df["delta"].apply(clasificar)
+
+    return df["estado"].values
+
 def grafica_modelo_vs_real(y_real, y_pred, titulo, tolerancia):
 
     import plotly.graph_objects as go
@@ -4727,14 +4748,19 @@ with tabs[4]:
             df_comp,
             st.session_state.get("vars_proceso", [])
         )
-    
         if not modelos:
             st.warning("No hay suficientes datos para ML")
             st.stop()
     
         mejor_modelo = None
         mejor_r2 = -999
-    
+        st.subheader("Tolerancia modelos ML")
+
+        tol_ml_global = st.slider(
+            "Tolerancia para TODOS los modelos ML",
+            0.0, 1.0, 0.05, 0.01,
+            key="tol_ml_global"
+        )
         for nombre, data in modelos.items():
     
             st.markdown(f"### {nombre} (R² = {data['r2']:.3f})")
@@ -4743,7 +4769,7 @@ with tabs[4]:
                 y_real,
                 data["pred"],
                 nombre,
-                tolerancia=0
+                tolerancia=tol_ml_global
             )
     
             st.plotly_chart(fig, use_container_width=True)
@@ -4761,6 +4787,75 @@ with tabs[4]:
         }).sort_values("Importancia", ascending=False)
         
         st.dataframe(imp_ml)
+        st.subheader("Clasificación de segmentos por modelo")
+        df_estado = df_comp.copy()
+        
+        df_estado["Segmento"] = df_estado["Segmento"]
+        
+        # MPA
+        estado_mpa = clasificar_por_tolerancia(
+            df_comp["Velocidad experimental"],
+            df_comp["Velocidad esperada"],
+            tol   # tu tolerancia MPA
+        )
+        
+        df_estado["MPA"] = estado_mpa
+        for nombre, data in modelos.items():
+        
+            estado_modelo = clasificar_por_tolerancia(
+                y_real,
+                data["pred"],
+                tol_ml_global   # 👈 el que añadimos antes
+            )
+        
+            df_estado[nombre] = estado_modelo
+        cols_final = ["Segmento", "MPA"] + list(modelos.keys())
+        df_estado_final = df_estado[cols_final]
+        st.dataframe(df_estado_final)
+        # =========================================
+        # 📊 RESUMEN DE SEGMENTOS POR MODELO
+        # =========================================
+        
+        st.subheader("Resumen de comportamiento por modelo")
+        
+        resumen = []
+        
+        for col in df_estado_final.columns:
+        
+            if col == "Segmento":
+                continue
+        
+            counts = df_estado_final[col].value_counts()
+        
+            resumen.append({
+                "Modelo": col,
+                "ENCIMA": counts.get("ENCIMA", 0),
+                "DEBAJO": counts.get("DEBAJO", 0),
+                "DENTRO": counts.get("DENTRO", 0),
+                "TOTAL": counts.sum()
+            })
+        
+        df_resumen_modelos = pd.DataFrame(resumen)
+        st.dataframe(df_resumen_modelos)
+        import plotly.express as px
+
+        df_plot = df_resumen_modelos.melt(
+            id_vars="Modelo",
+            value_vars=["ENCIMA", "DEBAJO", "DENTRO"],
+            var_name="Estado",
+            value_name="Cantidad"
+        )
+        
+        fig = px.bar(
+            df_plot,
+            x="Modelo",
+            y="Cantidad",
+            color="Estado",
+            barmode="group",
+            title="Distribución de segmentos por modelo"
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
         # =========================
         # 🟣 MEJOR MODELO
         # =========================
@@ -4873,7 +4968,52 @@ with tabs[4]:
         mejor_r2 = -999
     
         for nombre, data in modelos.items():
-    
+            # =========================================
+            # 📊 IMPORTANCIA VARIABLES POR MODELO
+            # =========================================
+            
+            st.subheader("Importancia de variables por modelo (comparativa)")
+            
+            importancias_all = []
+            
+            for nombre, data in modelos.items():
+            
+                for var, imp in data["importancias"].items():
+            
+                    # solo variables de proceso (evita columnas raras)
+                    if var in st.session_state.get("vars_proceso", []):
+            
+                        importancias_all.append({
+                            "Modelo": nombre,
+                            "Variable": var,
+                            "Importancia": imp
+                        })
+            
+            df_imp_all = pd.DataFrame(importancias_all)
+            
+            if not df_imp_all.empty:
+            
+                import plotly.express as px
+            
+                fig = px.bar(
+                    df_imp_all,
+                    x="Variable",
+                    y="Importancia",
+                    color="Modelo",
+                    barmode="group",
+                    title="Importancia de variables de proceso por modelo ML"
+                )
+            
+                fig.update_layout(
+                    xaxis_title="Variable",
+                    yaxis_title="Importancia",
+                    height=500
+                )
+            
+                st.plotly_chart(fig, use_container_width=True)
+            
+            else:
+                st.info("No hay datos de importancia disponibles")
             st.markdown(f"### {nombre} (R² = {data['r2']:.3f})")
     
             fig = grafica_modelo_vs_real(
