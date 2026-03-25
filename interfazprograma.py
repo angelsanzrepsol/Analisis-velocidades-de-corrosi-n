@@ -23,7 +23,74 @@ import io
 import re
 
 import json
+def analisis_desviacion_por_cesta(
+    df_cestas,
+    detalle_crudos
+):
 
+    resultados = []
+
+    for _, cesta in df_cestas.iterrows():
+
+        fi = pd.to_datetime(cesta["Fecha_ini"])
+        ff = pd.to_datetime(cesta["Fecha_fin"])
+
+        estado = cesta.get("Estado", "NA")
+        especies = cesta["Especies"]
+
+        sub = detalle_crudos[
+            (detalle_crudos["Fecha"] >= fi) &
+            (detalle_crudos["Fecha"] <= ff)
+        ]
+
+        if sub.empty:
+            continue
+
+        suma = (
+            sub.groupby("Especie")["Porcentaje"]
+            .sum()
+        )
+
+        total = suma.sum()
+
+        if total == 0:
+            continue
+
+        pct = (suma / total * 100)
+
+        for crudo, val in pct.items():
+
+            resultados.append({
+                "Cesta": ", ".join(especies),
+                "Estado": estado,
+                "Crudo": crudo,
+                "% promedio": val
+            })
+
+    df = pd.DataFrame(resultados)
+
+    if df.empty:
+        return df
+
+    # 🔥 AGRUPACIÓN FINAL
+    df_resumen = (
+        df.groupby(["Cesta", "Crudo", "Estado"])
+        .agg(
+            veces=("Crudo", "count"),
+            pct_medio=("% promedio", "mean")
+        )
+        .reset_index()
+    )
+
+    # pivot → ver claro ENCIMA / DEBAJO
+    df_pivot = df_resumen.pivot_table(
+        index=["Cesta", "Crudo"],
+        columns="Estado",
+        values="veces",
+        fill_value=0
+    ).reset_index()
+
+    return df_pivot
 def exportar_configuracion_json():
 
     config = {
@@ -4585,9 +4652,32 @@ with tabs[4]:
         "MPA vs Experimental",
         tol
     )
-
+    
     st.plotly_chart(fig_mpa, use_container_width=True)
+    st.markdown("### Análisis por cestas (MPA)")
 
+    df_cestas = analizar_cestas(
+        construir_cestas_crudo(detalle_crudos),
+        df_comp,
+        st.session_state.get("df_proc")
+    )
+    
+    df_cestas["Estado"] = (
+        df_comp["Velocidad experimental"]
+        - df_comp["Velocidad esperada"]
+    ).apply(
+        lambda x:
+        "ENCIMA" if x > tol
+        else "DEBAJO" if x < -tol
+        else "DENTRO"
+    )
+    
+    df_analisis = analisis_desviacion_por_cesta(
+        df_cestas,
+        detalle_crudos
+    )
+    
+    st.dataframe(df_analisis)
     # =========================
     # 🟢 MODELOS ML
     # =========================
@@ -4622,7 +4712,7 @@ with tabs[4]:
         if data["r2"] > mejor_r2:
             mejor_r2 = data["r2"]
             mejor_modelo = (nombre, data)
-
+        
     # =========================
     # 🟣 MEJOR MODELO
     # =========================
@@ -4643,6 +4733,22 @@ with tabs[4]:
     )
 
     st.plotly_chart(fig_best, use_container_width=True)
+    st.markdown("### Análisis por cestas (ML)")
+
+    df_ml = pd.DataFrame({
+        "Velocidad experimental": y_real,
+        "Velocidad predicha": mejor_modelo[1]["pred"]
+    })
+    
+    df_ml["Estado"] = (
+        df_ml["Velocidad experimental"]
+        - df_ml["Velocidad predicha"]
+    ).apply(
+        lambda x:
+        "ENCIMA" if x > tol_ml
+        else "DEBAJO" if x < -tol_ml
+        else "DENTRO"
+    )
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[5]:
 
