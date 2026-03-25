@@ -4807,7 +4807,31 @@ with tabs[4]:
         if c not in cols_excluir and c not in vars_proceso
     ]
     
-    X = df_ml[vars_proceso + vars_crudos].apply(pd.to_numeric, errors="coerce")
+    # Variables disponibles realmente en df_ml
+    cols_disponibles = df_ml.columns.tolist()
+    
+    # Filtrar variables de proceso válidas
+    vars_proceso_validas = [
+        v for v in vars_proceso if v in cols_disponibles
+    ]
+    
+    # Filtrar variables de crudo válidas
+    vars_crudos_validas = [
+        v for v in vars_crudos if v in cols_disponibles
+    ]
+    
+    # Debug útil
+    faltantes = set(vars_proceso + vars_crudos) - set(cols_disponibles)
+    if faltantes:
+        st.warning(f"Columnas ignoradas (no existen): {faltantes}")
+    
+    # Construcción segura
+    X = df_ml[vars_proceso_validas + vars_crudos_validas].apply(
+        pd.to_numeric, errors="coerce"
+    )
+    if X.shape[1] == 0:
+        st.error("No hay variables válidas para entrenar ML")
+        st.stop()
     y = pd.to_numeric(df_ml["Velocidad_corr"], errors="coerce")
     
     mask = (~X.isna().any(axis=1)) & (~y.isna())
