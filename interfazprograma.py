@@ -4655,7 +4655,17 @@ with tabs[4]:
     
     st.plotly_chart(fig_mpa, use_container_width=True)
     st.markdown("### Análisis por cestas (MPA)")
-
+    df_comp["delta_diag"] = (
+    df_comp["Velocidad experimental"]
+        - df_comp["Velocidad esperada"]
+    )
+    
+    df_comp["estado_diag"] = df_comp["delta_diag"].apply(
+        lambda x:
+            "ENCIMA" if x > tol
+            else "DEBAJO" if x < -tol
+            else "DENTRO"
+    )
     df_cestas = analizar_cestas(
         construir_cestas_crudo(detalle_crudos),
         df_comp,
