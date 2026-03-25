@@ -99,6 +99,136 @@ def dividir_todos_segmentos(
     return sorted(nuevos, key=lambda x: x["fecha_ini"])
 
 import plotly.graph_objects as go
+def entrenar_modelos_ml(df, vars_proceso):
+
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.metrics import r2_score
+
+    resultados = {}
+
+    df = df.copy()
+
+    # variables válidas
+    vars_validas = [v for v in vars_proceso if v in df.columns]
+
+    if not vars_validas:
+        return {}
+
+    X = df[vars_validas].apply(pd.to_numeric, errors="coerce")
+    y = pd.to_numeric(df["Velocidad experimental"], errors="coerce")
+
+    mask = (~X.isna().any(axis=1)) & (~y.isna())
+    X = X[mask]
+    y = y[mask]
+
+    if len(X) < 10:
+        return {}
+
+    # =========================
+    # RANDOM FOREST
+    # =========================
+    try:
+        rf = RandomForestRegressor(n_estimators=300, random_state=42)
+        rf.fit(X, y)
+        pred_rf = rf.predict(X)
+        resultados["Random Forest"] = {
+            "modelo": rf,
+            "pred": pred_rf,
+            "r2": r2_score(y, pred_rf)
+        }
+    except:
+        pass
+
+    # =========================
+    # XGBOOST
+    # =========================
+    try:
+        from xgboost import XGBRegressor
+
+        xgb = XGBRegressor(n_estimators=300, max_depth=4)
+        xgb.fit(X, y)
+        pred_xgb = xgb.predict(X)
+
+        resultados["XGBoost"] = {
+            "modelo": xgb,
+            "pred": pred_xgb,
+            "r2": r2_score(y, pred_xgb)
+        }
+    except:
+        pass
+
+    # =========================
+    # CATBOOST
+    # =========================
+    try:
+        from catboost import CatBoostRegressor
+
+        cat = CatBoostRegressor(verbose=0)
+        cat.fit(X, y)
+        pred_cat = cat.predict(X)
+
+        resultados["CatBoost"] = {
+            "modelo": cat,
+            "pred": pred_cat,
+            "r2": r2_score(y, pred_cat)
+        }
+    except:
+        pass
+
+    return resultados, y
+
+def grafica_modelo_vs_real(y_real, y_pred, titulo, tolerancia):
+
+    import plotly.graph_objects as go
+
+    df = pd.DataFrame({
+        "real": y_real,
+        "pred": y_pred
+    }).dropna()
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=df["real"],
+        y=df["pred"],
+        mode="markers"
+    ))
+
+    max_val = max(df["real"].max(), df["pred"].max())
+
+    # diagonal
+    fig.add_trace(go.Scatter(
+        x=[0, max_val],
+        y=[0, max_val],
+        mode="lines",
+        line=dict(color="red"),
+        name="y=x"
+    ))
+
+    # tolerancia
+    fig.add_trace(go.Scatter(
+        x=[0, max_val],
+        y=[tolerancia, max_val + tolerancia],
+        mode="lines",
+        line=dict(dash="dash"),
+        name="tolerancia +"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=[0, max_val],
+        y=[-tolerancia, max_val - tolerancia],
+        mode="lines",
+        line=dict(dash="dash"),
+        name="tolerancia -"
+    ))
+
+    fig.update_layout(
+        title=titulo,
+        xaxis_title="Real",
+        yaxis_title="Predicción"
+    )
+
+    return fig
 
 def graficar_especie_vs_corrosion(df_result, especie):
 
@@ -2641,6 +2771,7 @@ tabs = st.tabs([
     "Combinar hojas",
     "Revisión / Guardado",
     "Tabla corregida",
+    "Modelo predictivo",
     "Crudos"
 ])
 
@@ -4382,8 +4513,126 @@ with tabs[3]:
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No hay datos suficientes para graficar")
+            
+#-----------------------------------Modelo predictivo----------------------------------------------------------------     
+with tabs[4]:  
+
+    st.header("Modelo predictivo")
+
+    processed = st.session_state.get("processed_sheets", {})
+
+    processed = {
+        k: v for k, v in processed.items()
+        if v.get("saved")
+    }
+
+    if not processed:
+        st.info("No hay datos procesados")
+        st.stop()
+
+    # selector sondas
+    sondas = list(processed.keys())
+
+    sel_sondas = st.multiselect(
+        "Selecciona sondas",
+        sondas,
+        default=sondas
+    )
+
+    processed_filtrado = {
+        k: v for k, v in processed.items()
+        if k in sel_sondas
+    }
+
+    df_comp = construir_tabla_segmentos_comparativa(
+        processed_filtrado,
+        st.session_state.get("df_mpa"),
+        material_sel
+    )
+
+    if df_comp.empty:
+        st.warning("Sin datos")
+        st.stop()
+
+    df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
+
+    # =========================
+    # 🔵 MODELO MPA
+    # =========================
+
+    st.subheader("Modelo MPA")
+
+    tol = st.slider(
+        "Tolerancia MPA",
+        0.0, 1.0, 0.05, 0.01
+    )
+
+    fig_mpa = grafica_modelo_vs_real(
+        df_comp["Velocidad experimental"],
+        df_comp["Velocidad esperada"],
+        "MPA vs Experimental",
+        tol
+    )
+
+    st.plotly_chart(fig_mpa, use_container_width=True)
+
+    # =========================
+    # 🟢 MODELOS ML
+    # =========================
+
+    st.subheader("Modelo de datos (Machine Learning)")
+
+    modelos, y_real = entrenar_modelos_ml(
+        df_comp,
+        st.session_state.get("vars_proceso", [])
+    )
+
+    if not modelos:
+        st.warning("No hay suficientes datos para ML")
+        st.stop()
+
+    mejor_modelo = None
+    mejor_r2 = -999
+
+    for nombre, data in modelos.items():
+
+        st.markdown(f"### {nombre} (R² = {data['r2']:.3f})")
+
+        fig = grafica_modelo_vs_real(
+            y_real,
+            data["pred"],
+            nombre,
+            tolerancia=0
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        if data["r2"] > mejor_r2:
+            mejor_r2 = data["r2"]
+            mejor_modelo = (nombre, data)
+
+    # =========================
+    # 🟣 MEJOR MODELO
+    # =========================
+
+    st.subheader(f"Mejor modelo: {mejor_modelo[0]} (R²={mejor_r2:.3f})")
+
+    tol_ml = st.slider(
+        "Tolerancia modelo ML",
+        0.0, 1.0, 0.05, 0.01,
+        key="tol_ml"
+    )
+
+    fig_best = grafica_modelo_vs_real(
+        y_real,
+        mejor_modelo[1]["pred"],
+        "Mejor modelo vs real",
+        tol_ml
+    )
+
+    st.plotly_chart(fig_best, use_container_width=True)
 # -------------------- TAB 4: CRUDOS --------------------
-with tabs[4]:
+with tabs[5]:
 
     st.header("Análisis avanzado de crudos")
 
