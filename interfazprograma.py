@@ -4790,7 +4790,16 @@ with tabs[4]:
         df_ml["Fecha"] = pd.to_datetime(df_ml["Fecha"], errors="coerce")
         df_proc["Fecha"] = pd.to_datetime(df_proc["Fecha"], errors="coerce")
     
-        df_ml = df_ml.merge(df_proc, on="Fecha", how="left")
+        df_ml = df_ml.sort_values("Fecha")
+        df_proc = df_proc.sort_values("Fecha")
+        
+        df_ml = pd.merge_asof(
+            df_ml,
+            df_proc,
+            on="Fecha",
+            direction="nearest",
+            tolerance=pd.Timedelta("1D")  # puedes ajustar
+        )
     df_ml = expandir_segmentos_a_diario(df_ml)
     df_ml = df_ml.dropna(subset=["Velocidad_corr"])
     
