@@ -23,6 +23,29 @@ import io
 import re
 
 import json
+def construir_dataset_modelo_cestas(df_cestas):
+
+    if df_cestas is None or df_cestas.empty:
+        return pd.DataFrame()
+
+    df = df_cestas.copy()
+
+    # Target
+    df["Velocidad experimental"] = df["Velocidad"]
+
+    # 🔥 One-hot encoding de especies
+    especies_split = df["Especies"].str.split(", ")
+
+    especies_unicas = sorted(set(
+        e for sub in especies_split for e in sub
+    ))
+
+    for esp in especies_unicas:
+        df[f"ESP_{esp}"] = especies_split.apply(
+            lambda x: 1 if esp in x else 0
+        )
+
+    return df
 def analisis_desviacion_por_cesta(
     df_cestas,
     detalle_crudos
@@ -4547,7 +4570,7 @@ with tabs[3]:
         st.dataframe(df_rank_estado)
     
     st.markdown("## 🔬 Análisis avanzado de cestas (robusto con pocos datos)")
-    
+    st.session_state["df_cestas_global"] = df_cestas
     
     # =========================
     # ENRIQUECER RANKING
@@ -4618,7 +4641,10 @@ with tabs[3]:
             
 #-----------------------------------Modelo predictivo----------------------------------------------------------------     
 with tabs[4]:  
-
+    modo_modelo = st.selectbox(
+        "Modo de modelado",
+        ["Segmentos", "Cestas de crudo"]
+    )
     st.header("Modelo predictivo")
 
     processed = st.session_state.get("processed_sheets", {})
@@ -4669,127 +4695,269 @@ with tabs[4]:
     
     # 4️⃣ variable objetivo
     df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
-
-    # =========================
-    # 🔵 MODELO MPA
-    # =========================
-
-    st.subheader("Modelo MPA")
-
-    tol = st.slider(
-        "Tolerancia MPA",
-        0.0, 1.0, 0.05, 0.01
-    )
-
-    fig_mpa = grafica_modelo_vs_real(
-        df_comp["Velocidad experimental"],
-        df_comp["Velocidad esperada"],
-        "MPA vs Experimental",
-        tol
-    )
+    if modo_modelo == "Segmentos":
     
-    st.plotly_chart(fig_mpa, use_container_width=True)
+        # =========================
+        # 🔵 MODELO MPA
+        # =========================
     
-    # =========================
-    # 🟢 MODELOS ML
-    # =========================
-
-    st.subheader("Modelo de datos (Machine Learning)")
-
-    modelos, y_real = entrenar_modelos_ml(
-        df_comp,
-        st.session_state.get("vars_proceso", [])
-    )
-
-    if not modelos:
-        st.warning("No hay suficientes datos para ML")
-        st.stop()
-
-    mejor_modelo = None
-    mejor_r2 = -999
-
-    for nombre, data in modelos.items():
-
-        st.markdown(f"### {nombre} (R² = {data['r2']:.3f})")
-
-        fig = grafica_modelo_vs_real(
+        st.subheader("Modelo MPA")
+    
+        tol = st.slider(
+            "Tolerancia MPA",
+            0.0, 1.0, 0.05, 0.01
+        )
+    
+        fig_mpa = grafica_modelo_vs_real(
+            df_comp["Velocidad experimental"],
+            df_comp["Velocidad esperada"],
+            "MPA vs Experimental",
+            tol
+        )
+        
+        st.plotly_chart(fig_mpa, use_container_width=True)
+        
+        # =========================
+        # 🟢 MODELOS ML
+        # =========================
+    
+        st.subheader("Modelo de datos (Machine Learning)")
+    
+        modelos, y_real = entrenar_modelos_ml(
+            df_comp,
+            st.session_state.get("vars_proceso", [])
+        )
+    
+        if not modelos:
+            st.warning("No hay suficientes datos para ML")
+            st.stop()
+    
+        mejor_modelo = None
+        mejor_r2 = -999
+    
+        for nombre, data in modelos.items():
+    
+            st.markdown(f"### {nombre} (R² = {data['r2']:.3f})")
+    
+            fig = grafica_modelo_vs_real(
+                y_real,
+                data["pred"],
+                nombre,
+                tolerancia=0
+            )
+    
+            st.plotly_chart(fig, use_container_width=True)
+    
+            if data["r2"] > mejor_r2:
+                mejor_r2 = data["r2"]
+                mejor_modelo = (nombre, data)
+                nombre_best, data_best = mejor_modelo
+    
+        st.subheader("Importancia variables — mejor modelo ML")
+        
+        imp_ml = pd.DataFrame({
+            "Variable": list(data_best["importancias"].keys()),
+            "Importancia": list(data_best["importancias"].values())
+        }).sort_values("Importancia", ascending=False)
+        
+        st.dataframe(imp_ml)
+        # =========================
+        # 🟣 MEJOR MODELO
+        # =========================
+    
+        st.subheader(f"Mejor modelo: {mejor_modelo[0]} (R²={mejor_r2:.3f})")
+    
+        tol_ml = st.slider(
+            "Tolerancia modelo ML",
+            0.0, 1.0, 0.05, 0.01,
+            key="tol_ml"
+        )
+    
+        fig_best = grafica_modelo_vs_real(
             y_real,
-            data["pred"],
-            nombre,
-            tolerancia=0
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
-        if data["r2"] > mejor_r2:
-            mejor_r2 = data["r2"]
-            mejor_modelo = (nombre, data)
-            nombre_best, data_best = mejor_modelo
-
-    st.subheader("Importancia variables — mejor modelo ML")
-    
-    imp_ml = pd.DataFrame({
-        "Variable": list(data_best["importancias"].keys()),
-        "Importancia": list(data_best["importancias"].values())
-    }).sort_values("Importancia", ascending=False)
-    
-    st.dataframe(imp_ml)
-    # =========================
-    # 🟣 MEJOR MODELO
-    # =========================
-
-    st.subheader(f"Mejor modelo: {mejor_modelo[0]} (R²={mejor_r2:.3f})")
-
-    tol_ml = st.slider(
-        "Tolerancia modelo ML",
-        0.0, 1.0, 0.05, 0.01,
-        key="tol_ml"
-    )
-
-    fig_best = grafica_modelo_vs_real(
-        y_real,
-        mejor_modelo[1]["pred"],
-        "Mejor modelo vs real",
-        tol_ml
-    )
-
-    st.plotly_chart(fig_best, use_container_width=True)
-    # IMPORTANCIA MPA
-    imp_mpa = importancia_mpa(df_comp)
-    
-    if not imp_mpa.empty:
-    
-        df_plot = imp_ml.merge(
-            imp_mpa,
-            on="Variable",
-            how="outer",
-            suffixes=("_ML", "_MPA")
-        ).fillna(0)
-    
-        import plotly.graph_objects as go
-    
-        fig = go.Figure()
-    
-        fig.add_trace(go.Bar(
-            x=df_plot["Variable"],
-            y=df_plot["Importancia_ML"],
-            name="Modelo ML"
-        ))
-    
-        fig.add_trace(go.Bar(
-            x=df_plot["Variable"],
-            y=df_plot["Importancia_MPA"],
-            name="MPA"
-        ))
-    
-        fig.update_layout(
-            title="Comparación importancia variables (ML vs MPA)",
-            barmode="group",
-            xaxis_title="Variable",
-            yaxis_title="Importancia"
+            mejor_modelo[1]["pred"],
+            "Mejor modelo vs real",
+            tol_ml
         )
     
+        st.plotly_chart(fig_best, use_container_width=True)
+        # IMPORTANCIA MPA
+        imp_mpa = importancia_mpa(df_comp)
+        
+        if not imp_mpa.empty:
+        
+            df_plot = imp_ml.merge(
+                imp_mpa,
+                on="Variable",
+                how="outer",
+                suffixes=("_ML", "_MPA")
+            ).fillna(0)
+        
+            import plotly.graph_objects as go
+        
+            fig = go.Figure()
+        
+            fig.add_trace(go.Bar(
+                x=df_plot["Variable"],
+                y=df_plot["Importancia_ML"],
+                name="Modelo ML"
+            ))
+        
+            fig.add_trace(go.Bar(
+                x=df_plot["Variable"],
+                y=df_plot["Importancia_MPA"],
+                name="MPA"
+            ))
+        
+            fig.update_layout(
+                title="Comparación importancia variables (ML vs MPA)",
+                barmode="group",
+                xaxis_title="Variable",
+                yaxis_title="Importancia"
+            )
+        # TODO lo que ya tienes
+        df_comp = construir_tabla_segmentos_comparativa(
+            processed_filtrado,
+            st.session_state.get("df_mpa"),
+            material_sel
+        )
+    
+        df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
+    
+        modelos, y_real = entrenar_modelos_ml(
+            df_comp,
+            st.session_state.get("vars_proceso", [])
+        )
         st.plotly_chart(fig, use_container_width=True)
+    elif modo_modelo == "Cestas de crudo":
+    
+        df_cestas = st.session_state.get("df_cestas_global")
+    
+        if df_cestas is None or df_cestas.empty:
+            st.warning("No hay cestas calculadas. Ve a 'Tabla corregida'")
+            st.stop()
+    
+        # =========================
+        # DATASET
+        # =========================
+        df_model = construir_dataset_modelo_cestas(df_cestas)
+    
+        st.subheader("Dataset de cestas")
+        st.dataframe(df_model)
+    
+        # =========================
+        # VARIABLES MODELO
+        # =========================
+        vars_proceso = st.session_state.get("vars_proceso", [])
+    
+        vars_especies = [
+            c for c in df_model.columns
+            if c.startswith("ESP_")
+        ]
+    
+        vars_modelo = vars_proceso + vars_especies
+    
+        # =========================
+        # MODELOS ML
+        # =========================
+        modelos, y_real = entrenar_modelos_ml(
+            df_model,
+            vars_modelo
+        )
+    
+        if not modelos:
+            st.warning("No hay suficientes datos para ML")
+            st.stop()
+    
+        mejor_modelo = None
+        mejor_r2 = -999
+    
+        for nombre, data in modelos.items():
+    
+            st.markdown(f"### {nombre} (R² = {data['r2']:.3f})")
+    
+            fig = grafica_modelo_vs_real(
+                y_real,
+                data["pred"],
+                nombre,
+                tolerancia=0
+            )
+    
+            st.plotly_chart(fig, use_container_width=True)
+    
+            if data["r2"] > mejor_r2:
+                mejor_r2 = data["r2"]
+                mejor_modelo = (nombre, data)
+    
+        # =========================
+        # IMPORTANCIA ESPECIES
+        # =========================
+        st.subheader("Importancia de especies")
+    
+        imp_total = []
+    
+        for nombre, data in modelos.items():
+    
+            for var, imp in data["importancias"].items():
+    
+                if var.startswith("ESP_"):
+    
+                    imp_total.append({
+                        "Modelo": nombre,
+                        "Especie": var.replace("ESP_", ""),
+                        "Importancia": imp
+                    })
+    
+        df_imp = pd.DataFrame(imp_total)
+    
+        if not df_imp.empty:
+            st.dataframe(
+                df_imp.sort_values("Importancia", ascending=False)
+            )
+    
+        # =========================
+        # CORRELACIÓN DIRECTA
+        # =========================
+        def analizar_especies_directo(df_model):
+    
+            resultados = []
+    
+            for col in df_model.columns:
+    
+                if col.startswith("ESP_"):
+    
+                    sub = df_model[[col, "Velocidad experimental"]].dropna()
+    
+                    if len(sub) < 3 or sub[col].sum() < 3:
+                        continue
+    
+                    corr = np.corrcoef(
+                        sub[col],
+                        sub["Velocidad experimental"]
+                    )[0,1]
+    
+                    resultados.append({
+                        "Especie": col.replace("ESP_", ""),
+                        "Correlacion": corr
+                    })
+    
+            if not resultados:
+                return pd.DataFrame()
+    
+            return pd.DataFrame(resultados).sort_values(
+                "Correlacion",
+                key=abs,
+                ascending=False
+            )
+    
+        df_corr = analizar_especies_directo(df_model)
+    
+        st.subheader("Correlación directa especies vs corrosión")
+    
+        if not df_corr.empty:
+            st.dataframe(df_corr)
+        else:
+            st.info("No hay suficientes datos para correlación")
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[5]:
 
