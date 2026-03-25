@@ -201,7 +201,8 @@ def entrenar_modelos_ml(df, vars_proceso):
         resultados["Random Forest"] = {
             "modelo": rf,
             "pred": pred_rf,
-            "r2": r2_score(y, pred_rf)
+            "r2": r2_score(y, pred_rf),
+            "importancias": dict(zip(X.columns, rf.feature_importances_))
         }
     except:
         pass
@@ -219,7 +220,8 @@ def entrenar_modelos_ml(df, vars_proceso):
         resultados["XGBoost"] = {
             "modelo": xgb,
             "pred": pred_xgb,
-            "r2": r2_score(y, pred_xgb)
+            "r2": r2_score(y, pred_xgb),
+            "importancias": dict(zip(X.columns, xgb.feature_importances_))
         }
     except:
         pass
@@ -237,7 +239,8 @@ def entrenar_modelos_ml(df, vars_proceso):
         resultados["CatBoost"] = {
             "modelo": cat,
             "pred": pred_cat,
-            "r2": r2_score(y, pred_cat)
+            "r2": r2_score(y, pred_cat),
+            "importancias": dict(zip(X.columns, cat.feature_importances_))
         }
     except:
         pass
@@ -296,7 +299,39 @@ def grafica_modelo_vs_real(y_real, y_pred, titulo, tolerancia):
     )
 
     return fig
+def importancia_mpa(df):
 
+    vars_mpa = []
+
+    if "T" in df.columns:
+        vars_mpa.append("T")
+
+    if "TAN" in df.columns:
+        vars_mpa.append("TAN")
+
+    resultados = []
+
+    for var in vars_mpa:
+
+        sub = df[[var, "Velocidad esperada"]].dropna()
+
+        if len(sub) < 3:
+            continue
+
+        x = sub[var]
+        y = sub["Velocidad esperada"]
+
+        if x.std() == 0:
+            continue
+
+        corr = np.corrcoef(x, y)[0,1]
+
+        resultados.append({
+            "Variable": var,
+            "Importancia": abs(corr)
+        })
+
+    return pd.DataFrame(resultados)
 def graficar_especie_vs_corrosion(df_result, especie):
 
     if df_result.empty:
@@ -4689,7 +4724,16 @@ with tabs[4]:
         if data["r2"] > mejor_r2:
             mejor_r2 = data["r2"]
             mejor_modelo = (nombre, data)
+            nombre_best, data_best = mejor_modelo
 
+    st.subheader("Importancia variables — mejor modelo ML")
+    
+    imp_ml = pd.DataFrame({
+        "Variable": list(data_best["importancias"].keys()),
+        "Importancia": list(data_best["importancias"].values())
+    }).sort_values("Importancia", ascending=False)
+    
+    st.dataframe(imp_ml)
     # =========================
     # 🟣 MEJOR MODELO
     # =========================
@@ -4710,6 +4754,42 @@ with tabs[4]:
     )
 
     st.plotly_chart(fig_best, use_container_width=True)
+    # IMPORTANCIA MPA
+    imp_mpa = importancia_mpa(df_comp)
+    
+    if not imp_mpa.empty:
+    
+        df_plot = imp_ml.merge(
+            imp_mpa,
+            on="Variable",
+            how="outer",
+            suffixes=("_ML", "_MPA")
+        ).fillna(0)
+    
+        import plotly.graph_objects as go
+    
+        fig = go.Figure()
+    
+        fig.add_trace(go.Bar(
+            x=df_plot["Variable"],
+            y=df_plot["Importancia_ML"],
+            name="Modelo ML"
+        ))
+    
+        fig.add_trace(go.Bar(
+            x=df_plot["Variable"],
+            y=df_plot["Importancia_MPA"],
+            name="MPA"
+        ))
+    
+        fig.update_layout(
+            title="Comparación importancia variables (ML vs MPA)",
+            barmode="group",
+            xaxis_title="Variable",
+            yaxis_title="Importancia"
+        )
+    
+        st.plotly_chart(fig, use_container_width=True)
 # -------------------- TAB 4: CRUDOS --------------------
 with tabs[5]:
 
