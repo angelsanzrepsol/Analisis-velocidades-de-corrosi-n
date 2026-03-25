@@ -189,7 +189,7 @@ def entrenar_modelos_ml(df, vars_proceso):
     y = y[mask]
 
     if len(X) < 10:
-        return {}
+        return modelos, y_real
 
     # =========================
     # RANDOM FOREST
@@ -4760,8 +4760,11 @@ with tabs[4]:
     df_ml = df_ml.loc[mask].reset_index(drop=True)
     
     # 🔹 3. ENTRENAR MODELOS
+    df_train = X.copy()
+    df_train["Velocidad_corr"] = y
+    
     modelos, y_real = entrenar_modelos_ml(
-        pd.concat([X, y.rename("Velocidad experimental")], axis=1),
+        df_train,
         X.columns.tolist()
     )
     
