@@ -182,7 +182,7 @@ def entrenar_modelos_ml(df, vars_proceso):
         return {}
 
     X = df[vars_validas].apply(pd.to_numeric, errors="coerce")
-    y = pd.to_numeric(df["Velocidad experimental"], errors="coerce")
+    y = pd.to_numeric(df["Velocidad_corr"], errors="coerce")
 
     mask = (~X.isna().any(axis=1)) & (~y.isna())
     X = X[mask]
