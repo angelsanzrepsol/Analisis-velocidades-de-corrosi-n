@@ -4544,16 +4544,28 @@ with tabs[4]:
         if k in sel_sondas
     }
 
+    # 1️⃣ construir tabla base
     df_comp = construir_tabla_segmentos_comparativa(
         processed_filtrado,
         st.session_state.get("df_mpa"),
         material_sel
     )
-
-    if df_comp.empty:
-        st.warning("Sin datos")
-        st.stop()
-
+    
+    # 2️⃣ aplicar filtro de error (CLAVE)
+    processed_filtrado = aplicar_umbral_error_segmentos(
+        processed_filtrado,
+        df_comp,
+        st.session_state.get("umbral_error_segmento", 30.0)
+    )
+    
+    # 3️⃣ reconstruir tabla ya filtrada
+    df_comp = construir_tabla_segmentos_comparativa(
+        processed_filtrado,
+        st.session_state.get("df_mpa"),
+        material_sel
+    )
+    
+    # 4️⃣ variable objetivo
     df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
 
     # =========================
