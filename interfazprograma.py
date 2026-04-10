@@ -5252,49 +5252,7 @@ with tabs[4]:
         # 🔗 aquí sí coincide 1:1
         df_ml_full = df_comp.copy().reset_index(drop=True)
         df_ml_full["estado"] = df_ml["estado"]
-        # =========================================
-        # CLASIFICACIÓN MPA
-        # =========================================
-        
-        df_mpa = df_comp.copy()
-        
-        df_mpa["delta"] = (
-            df_mpa["Velocidad experimental"]
-            - df_mpa["Velocidad esperada"]
-        )
-        
-        df_mpa["estado"] = df_mpa["delta"].apply(
-            lambda x: "DEBAJO" if x > tol
-            else "ENCIMA" if x < -tol
-            else "DENTRO"
-        )
-        vars_proc = st.session_state.get("vars_proceso", [])
-
-        # ML
-        imp_ml_encima = importancia_por_subset(
-            df_ml_full[df_ml_full["estado"]=="ENCIMA"],
-            vars_proc,
-            "Velocidad experimental"
-        )
-        
-        imp_ml_debajo = importancia_por_subset(
-            df_ml_full[df_ml_full["estado"]=="DEBAJO"],
-            vars_proc,
-            "Velocidad experimental"
-        )
-        
-        # MPA
-        imp_mpa_encima = importancia_por_subset(
-            df_mpa[df_mpa["estado"]=="ENCIMA"],
-            vars_proc,
-            "Velocidad experimental"
-        )
-        
-        imp_mpa_debajo = importancia_por_subset(
-            df_mpa[df_mpa["estado"]=="DEBAJO"],
-            vars_proc,
-            "Velocidad experimental"
-        )
+       
         # =========================
         # IMPORTANCIA ESPECIES
         # =========================
@@ -5362,7 +5320,7 @@ with tabs[4]:
                 imp_mpa_debajo,
                 on="Variable",
                 how="outer",
-                suffixes=("_ML", "_MPA")
+                suffixes=("_ML")
             ).fillna(0)
         
             fig = go.Figure()
@@ -5372,13 +5330,6 @@ with tabs[4]:
                 y=df_plot["Importancia_ML"],
                 name="ML"
             ))
-        
-            fig.add_trace(go.Bar(
-                x=df_plot["Variable"],
-                y=df_plot["Importancia_MPA"],
-                name="MPA"
-            ))
-        
             fig.update_layout(
                 title="Importancia variables — SOBREESTIMADOS",
                 barmode="group"
