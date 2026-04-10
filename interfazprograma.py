@@ -206,7 +206,20 @@ def entrenar_modelos_ml(df, vars_proceso):
 
     X = df[vars_validas].apply(pd.to_numeric, errors="coerce")
     y = pd.to_numeric(df["Velocidad experimental"], errors="coerce")
-
+    # =========================
+    # SPLIT TRAIN / TEST
+    # =========================
+    from sklearn.model_selection import train_test_split
+    
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.10,   # 🔥 10% test
+        random_state=42
+    )
+    
+    if len(X_train) < 10 or len(X_test) < 3:
+        return {}, y
     mask = (~X.isna().any(axis=1)) & (~y.isna())
     X = X[mask]
     y = y[mask]
@@ -219,12 +232,15 @@ def entrenar_modelos_ml(df, vars_proceso):
     # =========================
     try:
         rf = RandomForestRegressor(n_estimators=300, random_state=42)
-        rf.fit(X, y)
-        pred_rf = rf.predict(X)
+        rf.fit(X_train, y_train)
+        
+        pred_rf = rf.predict(X_test)
+        
         resultados["Random Forest"] = {
             "modelo": rf,
             "pred": pred_rf,
-            "r2": r2_score(y, pred_rf),
+            "y_test": y_test,
+            "r2": r2_score(y_test, pred_rf),
             "importancias": dict(zip(X.columns, rf.feature_importances_))
         }
     except:
@@ -235,38 +251,51 @@ def entrenar_modelos_ml(df, vars_proceso):
     # =========================
     try:
         from xgboost import XGBRegressor
-
-        xgb = XGBRegressor(n_estimators=300, max_depth=4)
-        xgb.fit(X, y)
-        pred_xgb = xgb.predict(X)
-
+    
+        xgb = XGBRegressor(
+            n_estimators=300,
+            max_depth=4,
+            random_state=42
+        )
+    
+        xgb.fit(X_train, y_train)
+        pred_xgb = xgb.predict(X_test)
+    
         resultados["XGBoost"] = {
             "modelo": xgb,
             "pred": pred_xgb,
-            "r2": r2_score(y, pred_xgb),
+            "y_test": y_test,
+            "r2": r2_score(y_test, pred_xgb),
             "importancias": dict(zip(X.columns, xgb.feature_importances_))
         }
-    except:
-        pass
+    
+    except Exception as e:
+        print(f"Error XGBoost: {e}")
 
     # =========================
     # CATBOOST
     # =========================
     try:
         from catboost import CatBoostRegressor
-
-        cat = CatBoostRegressor(verbose=0)
-        cat.fit(X, y)
-        pred_cat = cat.predict(X)
-
+    
+        cat = CatBoostRegressor(
+            verbose=0,
+            random_state=42
+        )
+    
+        cat.fit(X_train, y_train)
+        pred_cat = cat.predict(X_test)
+    
         resultados["CatBoost"] = {
             "modelo": cat,
             "pred": pred_cat,
-            "r2": r2_score(y, pred_cat),
+            "y_test": y_test,
+            "r2": r2_score(y_test, pred_cat),
             "importancias": dict(zip(X.columns, cat.feature_importances_))
         }
-    except:
-        pass
+    
+    except Exception as e:
+        print(f"Error CatBoost: {e}")
 
     return resultados, y
 
@@ -291,7 +320,7 @@ def clasificar_por_tolerancia(y_real, y_pred, tol):
 
     return df["estado"].values
 
-def grafica_modelo_vs_real(y_real, y_pred, titulo, tolerancia):
+def grafica_modelo_vs_real(y_test, y_pred, titulo, tolerancia):
 
     import plotly.graph_objects as go
 
