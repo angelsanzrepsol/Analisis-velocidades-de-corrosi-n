@@ -4939,8 +4939,8 @@ with tabs[4]:
         df_ml["delta"] = df_ml["real"] - df_ml["pred"]
         
         df_ml["estado"] = df_ml["delta"].apply(
-            lambda x: "ENCIMA" if x > tol_ml_global
-            else "DEBAJO" if x < -tol_ml_global
+            lambda x: "DEBAJO" if x > tol_ml_global
+            else "ENCIMA" if x < -tol_ml_global
             else "DENTRO"
         )
         
@@ -5236,8 +5236,8 @@ with tabs[4]:
         df_ml["delta"] = df_ml["real"] - df_ml["pred"]
         
         df_ml["estado"] = df_ml["delta"].apply(
-            lambda x: "ENCIMA" if x > tol_ml_global
-            else "DEBAJO" if x < -tol_ml_global
+            lambda x: "DEBAJO" if x > tol_ml_global
+            else "ENCIMA" if x < -tol_ml_global
             else "DENTRO"
         )
         
