@@ -5278,67 +5278,6 @@ with tabs[4]:
             st.dataframe(
                 df_imp.sort_values("Importancia", ascending=False)
             )
-        st.subheader("🔴 Variables en segmentos SUBESTIMADOS")
-
-        if not imp_ml_encima.empty or not imp_mpa_encima.empty:
-        
-            df_plot = imp_ml_encima.merge(
-                imp_mpa_encima,
-                on="Variable",
-                how="outer",
-                suffixes=("_ML", "_MPA")
-            ).fillna(0)
-        
-            fig = go.Figure()
-        
-            fig.add_trace(go.Bar(
-                x=df_plot["Variable"],
-                y=df_plot["Importancia_ML"],
-                name="ML"
-            ))
-        
-            fig.add_trace(go.Bar(
-                x=df_plot["Variable"],
-                y=df_plot["Importancia_MPA"],
-                name="MPA"
-            ))
-        
-            fig.update_layout(
-                title="Importancia variables — SUBESTIMADOS",
-                barmode="group"
-            )
-        
-            st.plotly_chart(fig, use_container_width=True)
-        
-        else:
-            st.info("No hay datos suficientes para SUBESTIMADOS")
-            
-        st.subheader("🔵 Variables en segmentos SOBREESTIMADOS")
-        if not imp_ml_debajo.empty or not imp_mpa_debajo.empty:
-        
-            df_plot = imp_ml_debajo.merge(
-                imp_mpa_debajo,
-                on="Variable",
-                how="outer",
-                suffixes=("_ML")
-            ).fillna(0)
-        
-            fig = go.Figure()
-        
-            fig.add_trace(go.Bar(
-                x=df_plot["Variable"],
-                y=df_plot["Importancia_ML"],
-                name="ML"
-            ))
-            fig.update_layout(
-                title="Importancia variables — SOBREESTIMADOS",
-                barmode="group"
-            )
-        
-            st.plotly_chart(fig, use_container_width=True)
-        
-        else:
-            st.info("No hay datos suficientes para SOBREESTIMADOS")
         # =========================
         # CORRELACIÓN DIRECTA
         # =========================
