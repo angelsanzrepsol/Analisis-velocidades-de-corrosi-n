@@ -5244,15 +5244,127 @@ with tabs[4]:
         df_ml["delta"] = df_ml["real"] - df_ml["pred"]
         
         df_ml["estado"] = df_ml["delta"].apply(
-            lambda x: "ENCIMA" if x > tol_ml_global
-            else "DEBAJO" if x < -tol_ml_global
+            lambda x: "DEBAJO" if x > tol_ml_global
+            else "ENCIMA" if x < -tol_ml_global
             else "DENTRO"
         )
         
         # 🔗 aquí sí coincide 1:1
-        df_ml_full = df_comp.copy().reset_index(drop=True)
+        df_ml_full = df_model.copy().reset_index(drop=True)
         df_ml_full["estado"] = df_ml["estado"]
-       
+        # =========================================
+        # 🔎 ANÁLISIS AVANZADO POR CESTAS
+        # =========================================
+        
+        def analizar_grupo(df, nombre_grupo):
+        
+            st.subheader(f"📊 {nombre_grupo}")
+        
+            if df.empty:
+                st.info("No hay datos")
+                return
+        
+            # =========================
+            # 1️⃣ TABLA BASE
+            # =========================
+            st.markdown("### 🧾 Cestas")
+            st.dataframe(df)
+        
+            # =========================
+            # 2️⃣ CRUDOS MÁS FRECUENTES
+            # =========================
+            cols_crudos = [c for c in df.columns if c.startswith("CRUDO_")]
+        
+            if cols_crudos:
+                df_crudos = df[cols_crudos].sum().sort_values(ascending=False)
+                df_crudos_pct = (df_crudos / df_crudos.sum() * 100).round(1)
+        
+                df_crudos_final = pd.DataFrame({
+                    "Crudo": df_crudos.index.str.replace("CRUDO_", ""),
+                    "Frecuencia": df_crudos.values,
+                    "%": df_crudos_pct.values
+                })
+        
+                st.markdown("### 🛢️ Crudos más frecuentes")
+                st.dataframe(df_crudos_final)
+        
+            # =========================
+            # 3️⃣ ESPECIES MÁS FRECUENTES
+            # =========================
+            cols_esp = [c for c in df.columns if c.startswith("ESP_")]
+        
+            if cols_esp:
+                df_esp = df[cols_esp].sum().sort_values(ascending=False)
+                df_esp_pct = (df_esp / df_esp.sum() * 100).round(1)
+        
+                df_esp_final = pd.DataFrame({
+                    "Especie": df_esp.index.str.replace("ESP_", ""),
+                    "Frecuencia": df_esp.values,
+                    "%": df_esp_pct.values
+                })
+        
+                st.markdown("### 🧪 Especies más frecuentes")
+                st.dataframe(df_esp_final)
+        
+            # =========================
+            # 4️⃣ VARIABLES MÁS INFLUYENTES
+            # =========================
+            vars_proc = st.session_state.get("vars_proceso", [])
+        
+            resultados = []
+        
+            for var in vars_proc:
+        
+                if var not in df.columns:
+                    continue
+        
+                sub = df[[var, "Velocidad experimental"]].dropna()
+        
+                if len(sub) < 3:
+                    continue
+        
+                corr = np.corrcoef(sub[var], sub["Velocidad experimental"])[0,1]
+        
+                resultados.append({
+                    "Variable": var,
+                    "Impacto": abs(corr)
+                })
+        
+            if resultados:
+                df_vars = pd.DataFrame(resultados).sort_values("Impacto", ascending=False)
+        
+                st.markdown("### ⚙️ Variables más influyentes")
+                st.dataframe(df_vars)
+        
+            # =========================
+            # 5️⃣ FECHAS
+            # =========================
+            if "Fecha" in df.columns:
+        
+                fechas = df["Fecha"].sort_values()
+        
+                st.markdown("### 📅 Rango de fechas")
+                st.write(f"Desde: {fechas.min()}")
+                st.write(f"Hasta: {fechas.max()}")
+        
+                st.markdown("### 📅 Fechas individuales")
+                st.dataframe(fechas.reset_index(drop=True))
+        
+        
+        # =========================
+        # 🔴 SUBESTIMADOS
+        # =========================
+        df_sub = df_ml_full[df_ml_full["estado"]=="SUBESTIMA"]
+        
+        analizar_grupo(df_sub, "🔴 Cestas SUBESTIMADAS")
+        
+        
+        # =========================
+        # 🔵 SOBREESTIMADOS
+        # =========================
+        df_sobre = df_ml_full[df_ml_full["estado"]=="SOBREESTIMA"]
+        
+        analizar_grupo(df_sobre, "🔵 Cestas SOBREESTIMADAS")
         # =========================
         # IMPORTANCIA ESPECIES
         # =========================
