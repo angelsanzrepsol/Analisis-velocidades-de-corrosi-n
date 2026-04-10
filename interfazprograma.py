@@ -3656,10 +3656,7 @@ with tabs[2]:
     
         if cols_calidad:
             st.dataframe(
-                df_comp.style.applymap(
-                    color_calidad,
-                    subset=cols_calidad
-                )
+                df_comp.style.map(color_calidad, subset=cols_calidad)
             )
         else:
             st.dataframe(df_comp)
