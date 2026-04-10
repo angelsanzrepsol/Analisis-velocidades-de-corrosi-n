@@ -230,44 +230,6 @@ def entrenar_modelos_ml(df, vars_proceso):
     except:
         pass
 
-    # =========================
-    # XGBOOST
-    # =========================
-    try:
-        from xgboost import XGBRegressor
-
-        xgb = XGBRegressor(n_estimators=300, max_depth=4)
-        xgb.fit(X, y)
-        pred_xgb = xgb.predict(X)
-
-        resultados["XGBoost"] = {
-            "modelo": xgb,
-            "pred": pred_xgb,
-            "r2": r2_score(y, pred_xgb),
-            "importancias": dict(zip(X.columns, xgb.feature_importances_))
-        }
-    except:
-        pass
-
-    # =========================
-    # CATBOOST
-    # =========================
-    try:
-        from catboost import CatBoostRegressor
-
-        cat = CatBoostRegressor(verbose=0)
-        cat.fit(X, y)
-        pred_cat = cat.predict(X)
-
-        resultados["CatBoost"] = {
-            "modelo": cat,
-            "pred": pred_cat,
-            "r2": r2_score(y, pred_cat),
-            "importancias": dict(zip(X.columns, cat.feature_importances_))
-        }
-    except:
-        pass
-
     return resultados, y
 
 def clasificar_por_tolerancia(y_real, y_pred, tol):
