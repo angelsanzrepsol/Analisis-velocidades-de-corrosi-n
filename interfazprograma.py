@@ -5121,7 +5121,14 @@ with tabs[4]:
         else:
             st.info("No hay datos suficientes para SOBREESTIMADOS")
     elif modo_modelo == "Cestas de crudo":
-    
+        # =========================
+        # TOLERANCIA ML
+        # =========================
+        tol_ml_global = st.slider(
+            "Tolerancia para modelos ML (cestas)",
+            0.0, 1.0, 0.05, 0.01,
+            key="tol_ml_global_cestas"
+        )
         df_cestas = st.session_state.get("df_cestas_global")
     
         if df_cestas is None or df_cestas.empty:
