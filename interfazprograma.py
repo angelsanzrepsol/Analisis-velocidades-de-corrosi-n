@@ -305,6 +305,40 @@ def grafica_modelo_vs_real(y_real, y_pred, titulo, tolerancia):
     )
 
     return fig
+def importancia_por_subset(df, vars_proceso, target):
+
+    resultados = []
+
+    for var in vars_proceso:
+
+        if var not in df.columns:
+            continue
+
+        sub = df[[var, target]].dropna()
+
+        if len(sub) < 3:
+            continue
+
+        x = sub[var]
+        y = sub[target]
+
+        if x.std() == 0:
+            continue
+
+        corr = np.corrcoef(x, y)[0,1]
+
+        resultados.append({
+            "Variable": var,
+            "Importancia": abs(corr)
+        })
+
+    if not resultados:
+        return pd.DataFrame()
+
+    return pd.DataFrame(resultados).sort_values(
+        "Importancia",
+        ascending=False
+    )
 def importancia_mpa(df):
 
     vars_mpa = []
@@ -4879,7 +4913,7 @@ with tabs[4]:
             st.session_state.get("df_mpa"),
             material_sel
         )
-    
+        
         df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
     
         modelos, y_real = entrenar_modelos_ml(
@@ -4991,7 +5025,69 @@ with tabs[4]:
             if data["r2"] > mejor_r2:
                 mejor_r2 = data["r2"]
                 mejor_modelo = (nombre, data)
-    
+        # =========================================
+        # CLASIFICACIÓN ML (MEJOR MODELO)
+        # =========================================
+        
+        df_ml = pd.DataFrame({
+            "real": data_best["y_test"],
+            "pred": data_best["pred"]
+        }).reset_index(drop=True)
+        
+        df_ml["delta"] = df_ml["real"] - df_ml["pred"]
+        
+        df_ml["estado"] = df_ml["delta"].apply(
+            lambda x: "ENCIMA" if x > tol_ml_global
+            else "DEBAJO" if x < -tol_ml_global
+            else "DENTRO"
+        )
+        
+        # 🔗 Vincular con df original (IMPORTANTE)
+        df_ml_full = df_comp.loc[data_best["y_test"].index].copy().reset_index(drop=True)
+        df_ml_full["estado"] = df_ml["estado"]
+        # =========================================
+        # CLASIFICACIÓN MPA
+        # =========================================
+        
+        df_mpa = df_comp.copy()
+        
+        df_mpa["delta"] = (
+            df_mpa["Velocidad experimental"]
+            - df_mpa["Velocidad esperada"]
+        )
+        
+        df_mpa["estado"] = df_mpa["delta"].apply(
+            lambda x: "ENCIMA" if x > tol
+            else "DEBAJO" if x < -tol
+            else "DENTRO"
+        )
+        vars_proc = st.session_state.get("vars_proceso", [])
+
+        # ML
+        imp_ml_encima = importancia_por_subset(
+            df_ml_full[df_ml_full["estado"]=="ENCIMA"],
+            vars_proc,
+            "Velocidad experimental"
+        )
+        
+        imp_ml_debajo = importancia_por_subset(
+            df_ml_full[df_ml_full["estado"]=="DEBAJO"],
+            vars_proc,
+            "Velocidad experimental"
+        )
+        
+        # MPA
+        imp_mpa_encima = importancia_por_subset(
+            df_mpa[df_mpa["estado"]=="ENCIMA"],
+            vars_proc,
+            "Velocidad experimental"
+        )
+        
+        imp_mpa_debajo = importancia_por_subset(
+            df_mpa[df_mpa["estado"]=="DEBAJO"],
+            vars_proc,
+            "Velocidad experimental"
+        )
         # =========================
         # IMPORTANCIA ESPECIES
         # =========================
@@ -5017,7 +5113,74 @@ with tabs[4]:
             st.dataframe(
                 df_imp.sort_values("Importancia", ascending=False)
             )
-    
+        st.subheader("🔴 Variables en segmentos SUBESTIMADOS")
+
+        if not imp_ml_encima.empty or not imp_mpa_encima.empty:
+        
+            df_plot = imp_ml_encima.merge(
+                imp_mpa_encima,
+                on="Variable",
+                how="outer",
+                suffixes=("_ML", "_MPA")
+            ).fillna(0)
+        
+            fig = go.Figure()
+        
+            fig.add_trace(go.Bar(
+                x=df_plot["Variable"],
+                y=df_plot["Importancia_ML"],
+                name="ML"
+            ))
+        
+            fig.add_trace(go.Bar(
+                x=df_plot["Variable"],
+                y=df_plot["Importancia_MPA"],
+                name="MPA"
+            ))
+        
+            fig.update_layout(
+                title="Importancia variables — SUBESTIMADOS",
+                barmode="group"
+            )
+        
+            st.plotly_chart(fig, use_container_width=True)
+        
+        else:
+            st.info("No hay datos suficientes para SUBESTIMADOS")
+            
+        st.subheader("🔵 Variables en segmentos SOBREESTIMADOS")
+        if not imp_ml_debajo.empty or not imp_mpa_debajo.empty:
+        
+            df_plot = imp_ml_debajo.merge(
+                imp_mpa_debajo,
+                on="Variable",
+                how="outer",
+                suffixes=("_ML", "_MPA")
+            ).fillna(0)
+        
+            fig = go.Figure()
+        
+            fig.add_trace(go.Bar(
+                x=df_plot["Variable"],
+                y=df_plot["Importancia_ML"],
+                name="ML"
+            ))
+        
+            fig.add_trace(go.Bar(
+                x=df_plot["Variable"],
+                y=df_plot["Importancia_MPA"],
+                name="MPA"
+            ))
+        
+            fig.update_layout(
+                title="Importancia variables — SOBREESTIMADOS",
+                barmode="group"
+            )
+        
+            st.plotly_chart(fig, use_container_width=True)
+        
+        else:
+            st.info("No hay datos suficientes para SOBREESTIMADOS")
         # =========================
         # CORRELACIÓN DIRECTA
         # =========================
