@@ -4928,10 +4928,11 @@ with tabs[4]:
         st.subheader("Análisis de errores por tipo (ML vs MPA)")
         
         # =========================
-        # CLASIFICACIÓN ML (MEJOR MODELO)
+        # CLASIFICACIÓN ML (SIN SPLIT)
         # =========================
+        
         df_ml = pd.DataFrame({
-            "real": data_best["y_test"],
+            "real": y_real,
             "pred": data_best["pred"]
         }).reset_index(drop=True)
         
@@ -4943,8 +4944,8 @@ with tabs[4]:
             else "DENTRO"
         )
         
-        # ⚠️ alineación robusta (evita errores de índices)
-        df_ml_full = df_comp.iloc[:len(df_ml)].copy()
+        # 🔗 aquí sí coincide 1:1
+        df_ml_full = df_comp.copy().reset_index(drop=True)
         df_ml_full["estado"] = df_ml["estado"]
         
         
