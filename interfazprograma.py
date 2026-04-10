@@ -5224,6 +5224,7 @@ with tabs[4]:
             if data["r2"] > mejor_r2:
                 mejor_r2 = data["r2"]
                 mejor_modelo = (nombre, data)
+        nombre_best, data_best = mejor_modelo
         # =========================
         # CLASIFICACIÓN ML (SIN SPLIT)
         # =========================
