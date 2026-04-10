@@ -3649,16 +3649,20 @@ with tabs[2]:
             st.info("No hay suficientes datos para análisis multivariable.")
 
 
-    if df_comp.empty:
+    if df_comp is None or df_comp.empty:
         st.info("No hay sondas guardadas aún.")
     else:
+        cols_calidad = [col for col in df_comp.columns if "Calidad" in col]
     
-        st.dataframe(
-            df_comp.style.applymap(
-                color_calidad,
-                subset=[col for col in df_comp.columns if "Calidad" in col]
+        if cols_calidad:
+            st.dataframe(
+                df_comp.style.applymap(
+                    color_calidad,
+                    subset=cols_calidad
+                )
             )
-        )
+        else:
+            st.dataframe(df_comp)
 
         buffer = io.BytesIO()
         df_comp.to_excel(buffer, index=False)
