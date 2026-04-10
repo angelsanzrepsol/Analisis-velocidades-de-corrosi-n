@@ -5244,11 +5244,10 @@ with tabs[4]:
         df_ml["delta"] = df_ml["real"] - df_ml["pred"]
         
         df_ml["estado"] = df_ml["delta"].apply(
-            lambda x: "DEBAJO" if x > tol_ml_global
-            else "ENCIMA" if x < -tol_ml_global
+            lambda x: "SUBESTIMA" if x > tol_ml_global
+            else "SOBREESTIMA" if x < -tol_ml_global
             else "DENTRO"
         )
-        
         # 🔗 aquí sí coincide 1:1
         df_ml_full = df_model.copy().reset_index(drop=True)
         df_ml_full["estado"] = df_ml["estado"]
