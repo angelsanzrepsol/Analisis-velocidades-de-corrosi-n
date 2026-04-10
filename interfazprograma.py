@@ -4960,8 +4960,8 @@ with tabs[4]:
         )
         
         df_mpa["estado"] = df_mpa["delta"].apply(
-            lambda x: "ENCIMA" if x > tol
-            else "DEBAJO" if x < -tol
+            lambda x: "DEBAJO" if x > tol
+            else "ENCIMA" if x < -tol
             else "DENTRO"
         )
         
@@ -5224,25 +5224,25 @@ with tabs[4]:
             if data["r2"] > mejor_r2:
                 mejor_r2 = data["r2"]
                 mejor_modelo = (nombre, data)
-        # =========================================
-        # CLASIFICACIÓN ML (MEJOR MODELO)
-        # =========================================
+        # =========================
+        # CLASIFICACIÓN ML (SIN SPLIT)
+        # =========================
         
         df_ml = pd.DataFrame({
-            "real": data_best["y_test"],
+            "real": y_real,
             "pred": data_best["pred"]
         }).reset_index(drop=True)
         
         df_ml["delta"] = df_ml["real"] - df_ml["pred"]
         
         df_ml["estado"] = df_ml["delta"].apply(
-            lambda x: "DEBAJO" if x > tol_ml_global
-            else "ENCIMA" if x < -tol_ml_global
+            lambda x: "ENCIMA" if x > tol_ml_global
+            else "DEBAJO" if x < -tol_ml_global
             else "DENTRO"
         )
         
-        # 🔗 Vincular con df original (IMPORTANTE)
-        df_ml_full = df_comp.loc[data_best["y_test"].index].copy().reset_index(drop=True)
+        # 🔗 aquí sí coincide 1:1
+        df_ml_full = df_comp.copy().reset_index(drop=True)
         df_ml_full["estado"] = df_ml["estado"]
         # =========================================
         # CLASIFICACIÓN MPA
@@ -5256,8 +5256,8 @@ with tabs[4]:
         )
         
         df_mpa["estado"] = df_mpa["delta"].apply(
-            lambda x: "ENCIMA" if x > tol
-            else "DEBAJO" if x < -tol
+            lambda x: "DEBAJO" if x > tol
+            else "ENCIMA" if x < -tol
             else "DENTRO"
         )
         vars_proc = st.session_state.get("vars_proceso", [])
