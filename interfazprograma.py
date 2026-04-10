@@ -325,7 +325,7 @@ def grafica_modelo_vs_real(y_test, y_pred, titulo, tolerancia):
     import plotly.graph_objects as go
 
     df = pd.DataFrame({
-        "real": y_real,
+        "real": y_test,
         "pred": y_pred
     }).dropna()
 
