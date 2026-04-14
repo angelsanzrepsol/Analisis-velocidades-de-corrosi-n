@@ -2174,43 +2174,64 @@ def detectar_segmentos_fallback(df_original, umbral_factor=1.02, umbral=0.0005, 
     return df_filtrado, np.asarray(y_suave), cambios, segmentos_raw
 def cargar_propiedades_crudos(uploaded_file):
 
-    df = pd.read_excel(uploaded_file)
+    import pandas as pd
 
-    # limpiar nombres de columnas
+    df = None
+
+    # 1️⃣ Intentar Excel moderno
+    try:
+        df = pd.read_excel(uploaded_file, engine="openpyxl")
+    except Exception as e:
+        print("openpyxl falló:", e)
+
+    # 2️⃣ Intentar Excel antiguo (.xls)
+    if df is None:
+        try:
+            df = pd.read_excel(uploaded_file, engine="xlrd")
+        except Exception as e:
+            print("xlrd falló:", e)
+
+    # 3️⃣ Intentar CSV
+    if df is None:
+        try:
+            df = pd.read_csv(uploaded_file)
+        except Exception as e:
+            print("csv falló:", e)
+            raise ValueError("No se pudo leer el archivo")
+
+    # -----------------------------
+    # LIMPIEZA
+    # -----------------------------
     df.columns = [str(c).strip() for c in df.columns]
 
-    # buscar columna especie (flexible)
+    # DEBUG (muy útil ahora)
+    print("COLUMNAS DETECTADAS:", df.columns.tolist())
+
     col_especie = None
-    for c in df.columns:
-        if "espec" in c.lower():
-            col_especie = c
-            break
-
-    if col_especie is None:
-        raise ValueError("No se encontró columna de especie")
-
-    # buscar columnas objetivo
     col_azufre = None
     col_tan = None
 
     for c in df.columns:
         cl = c.lower()
 
-        if "azuf" in cl:
+        if "espec" in cl or "crudo" in cl:
+            col_especie = c
+
+        if "azuf" in cl or "sulfur" in cl:
             col_azufre = c
 
-        if "neutral" in cl or "tan" in cl:
+        if "neutral" in cl or "tan" in cl or "acid" in cl:
             col_tan = c
 
+    if col_especie is None:
+        raise ValueError("No se encontró columna de especie")
+
     if col_azufre is None or col_tan is None:
-        raise ValueError("No se encontraron columnas Azufre o NºNeutralización")
+        raise ValueError(f"No se detectaron bien columnas. Columnas disponibles: {df.columns.tolist()}")
 
-    # quedarte solo con lo necesario
     df_final = df[[col_especie, col_azufre, col_tan]].copy()
-
     df_final.columns = ["Especie", "Azufre", "TAN"]
 
-    # convertir a numérico
     df_final["Azufre"] = pd.to_numeric(df_final["Azufre"], errors="coerce")
     df_final["TAN"] = pd.to_numeric(df_final["TAN"], errors="coerce")
 
@@ -3256,7 +3277,26 @@ with tabs[0]:
                     
                                 st.success("Segmento recuperado")
                                 st.rerun()
-
+                        if st.button("Recuperar todos segmentos eliminados"):
+                        
+                            for key, data in st.session_state.get("processed_sheets", {}).items():
+                        
+                                descartados = data.get("descartados", [])
+                                validos = data.get("segmentos_validos", [])
+                        
+                                if not descartados:
+                                    continue
+                        
+                                # mover descartados a válidos
+                                for seg in descartados:
+                                    seg["estado"] = "recuperado"
+                                    validos.append(seg)
+                        
+                                # vaciar descartados
+                                data["descartados"] = []
+                                data["segmentos_validos"] = validos
+                        
+                            st.success("Segmentos recuperados correctamente")
                     seg_list = []
                     try:
                         seg_list = [f"{i+1}: {s.get('fecha_ini')} → {s.get('fecha_fin')}  | Vel: {s.get('vel_abs')}" for i,s in enumerate(st.session_state["processed_sheets"][key]["segmentos_validos"])]
