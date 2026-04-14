@@ -2176,52 +2176,25 @@ def cargar_propiedades_crudos(uploaded_file):
 
     import pandas as pd
     import unicodedata
+    import re
 
-    df = None
+    df = pd.read_excel(uploaded_file)
 
-    # =========================================
-    # 1️⃣ INTENTAR LEER ARCHIVO (ROBUSTO)
-    # =========================================
-    try:
-        df = pd.read_excel(uploaded_file, engine="openpyxl")
-    except Exception as e:
-        print("openpyxl falló:", e)
-
-    if df is None:
-        try:
-            df = pd.read_excel(uploaded_file, engine="xlrd")
-        except Exception as e:
-            print("xlrd falló:", e)
-
-    if df is None:
-        try:
-            df = pd.read_csv(uploaded_file)
-        except Exception as e:
-            print("csv falló:", e)
-            raise ValueError("No se pudo leer el archivo")
-
-    # =========================================
-    # 2️⃣ LIMPIAR NOMBRES DE COLUMNAS
-    # =========================================
+    # limpiar nombres
     df.columns = [str(c).strip() for c in df.columns]
 
-    # =========================================
-    # 3️⃣ FUNCIÓN PARA NORMALIZAR TEXTO
-    # =========================================
+    # =========================
+    # NORMALIZAR TEXTO
+    # =========================
     def limpiar_texto(texto):
         texto = str(texto).lower()
         texto = unicodedata.normalize("NFKD", texto)
         texto = texto.encode("ascii", "ignore").decode("utf-8")
         return texto
 
-    # DEBUG (puedes quitar luego)
-    print("Columnas originales:", df.columns.tolist())
-    for c in df.columns:
-        print(c, "→", limpiar_texto(c))
-
-    # =========================================
-    # 4️⃣ DETECTAR COLUMNAS
-    # =========================================
+    # =========================
+    # DETECTAR COLUMNAS
+    # =========================
     col_especie = None
     col_azufre = None
     col_tan = None
@@ -2230,25 +2203,15 @@ def cargar_propiedades_crudos(uploaded_file):
 
         cl = limpiar_texto(c)
 
-        # especie
-        if "espec" in cl or "crudo" in cl:
+        if "nombre" in cl or "crudo" in cl:
             col_especie = c
 
-        # azufre
-        if "azuf" in cl or "sulfur" in cl:
+        if "azuf" in cl:
             col_azufre = c
 
-        # TAN / NºNeutralización
-        if (
-            "neutral" in cl
-            or "acid" in cl
-            or "tan" in cl
-        ):
+        if "neutral" in cl:
             col_tan = c
 
-    # =========================================
-    # 5️⃣ VALIDACIÓN
-    # =========================================
     if col_especie is None:
         raise ValueError("No se encontró columna de especie")
 
@@ -2256,19 +2219,45 @@ def cargar_propiedades_crudos(uploaded_file):
         raise ValueError("No se encontró columna de Azufre")
 
     if col_tan is None:
-        raise ValueError(
-            f"No se encontró columna de NºNeutralización. Columnas disponibles: {df.columns.tolist()}"
-        )
+        raise ValueError("No se encontró columna de Nº Neutralización")
 
-    # =========================================
-    # 6️⃣ FILTRAR Y LIMPIAR
-    # =========================================
+    # =========================
+    # EXTRAER SOLO LO NECESARIO
+    # =========================
     df_final = df[[col_especie, col_azufre, col_tan]].copy()
 
     df_final.columns = ["Especie", "Azufre", "TAN"]
 
+    # =========================
+    # LIMPIAR AZUFRE
+    # =========================
     df_final["Azufre"] = pd.to_numeric(df_final["Azufre"], errors="coerce")
-    df_final["TAN"] = pd.to_numeric(df_final["TAN"], errors="coerce")
+
+    # =========================
+    # LIMPIAR TAN (MUY IMPORTANTE)
+    # =========================
+    def extraer_numero(texto):
+
+        if pd.isna(texto):
+            return None
+
+        texto = str(texto)
+
+        # buscar números tipo 0,25 o 2.3
+        nums = re.findall(r"\d+[.,]?\d*", texto)
+
+        if not nums:
+            return None
+
+        # coger el primero (puedes cambiar a media si quieres)
+        num = nums[0].replace(",", ".")
+
+        try:
+            return float(num)
+        except:
+            return None
+
+    df_final["TAN"] = df_final["TAN"].apply(extraer_numero)
 
     # eliminar filas vacías
     df_final = df_final.dropna(subset=["Especie"])
