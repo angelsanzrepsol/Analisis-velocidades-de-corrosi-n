@@ -1877,6 +1877,11 @@ uploaded_mpa = st.sidebar.file_uploader(
     type=["xlsx"],
     key="file_uploader_mpa"
 )
+uploaded_especies = st.sidebar.file_uploader(
+    "Archivo de propiedades de crudos (.xlsx)",
+    type=["xlsx"],
+    key="file_uploader_especies"
+)
 st.sidebar.markdown("---")
 st.sidebar.header("División global de segmentos")
 
@@ -2167,7 +2172,65 @@ def detectar_segmentos_fallback(df_original, umbral_factor=1.02, umbral=0.0005, 
                 velocidad = np.nan
         segmentos_raw.append({"ini": ini, "fin": fin, "fecha_ini": fecha_ini, "fecha_fin": fecha_fin, "delta_dias": delta_dias, "velocidad": velocidad})
     return df_filtrado, np.asarray(y_suave), cambios, segmentos_raw
+def cargar_propiedades_crudos(uploaded_file):
 
+    df = pd.read_excel(uploaded_file)
+
+    # limpiar nombres de columnas
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # buscar columna especie (flexible)
+    col_especie = None
+    for c in df.columns:
+        if "espec" in c.lower():
+            col_especie = c
+            break
+
+    if col_especie is None:
+        raise ValueError("No se encontró columna de especie")
+
+    # buscar columnas objetivo
+    col_azufre = None
+    col_tan = None
+
+    for c in df.columns:
+        cl = c.lower()
+
+        if "azuf" in cl:
+            col_azufre = c
+
+        if "neutral" in cl or "tan" in cl:
+            col_tan = c
+
+    if col_azufre is None or col_tan is None:
+        raise ValueError("No se encontraron columnas Azufre o NºNeutralización")
+
+    # quedarte solo con lo necesario
+    df_final = df[[col_especie, col_azufre, col_tan]].copy()
+
+    df_final.columns = ["Especie", "Azufre", "TAN"]
+
+    # convertir a numérico
+    df_final["Azufre"] = pd.to_numeric(df_final["Azufre"], errors="coerce")
+    df_final["TAN"] = pd.to_numeric(df_final["TAN"], errors="coerce")
+
+    return df_final
+
+if uploaded_especies is not None:
+
+    try:
+        df_propiedades = cargar_propiedades_crudos(uploaded_especies)
+
+        st.session_state["df_propiedades_crudos"] = df_propiedades
+
+        st.sidebar.success("Propiedades de crudos cargadas")
+
+        # opcional: ver preview
+        st.write("Preview propiedades de crudos:")
+        st.dataframe(df_propiedades.head())
+
+    except Exception as e:
+        st.sidebar.error(f"Error leyendo propiedades: {e}")
 def extraer_segmentos_validos_fallback(df_filtrado, y_suave, segmentos_raw, df_proc=None, vars_proceso=None, min_dias=10):
     segmentos_validos = []
     descartados = []
@@ -5432,187 +5495,6 @@ with tabs[4]:
             st.dataframe(df_corr)
         else:
             st.info("No hay suficientes datos para correlación")
-# -------------------- TAB 4: CRUDOS --------------------
-with tabs[5]:
-
-    st.header("Análisis avanzado de crudos")
-
-    if uploaded_crudos is None:
-        st.info("Sube Excel de crudos")
-    
-    else:
-    
-        hojas = leer_archivo(uploaded_crudos)
-        hoja_sel = st.selectbox("Hoja crudos", list(hojas.keys()))
-        df_crudos = hojas[hoja_sel]
-    
-        detalle_crudos = procesar_crudos(df_crudos)
-    
-        df_master = construir_dataset_crudos_segmentos(
-            detalle_crudos,
-            st.session_state.get("processed_sheets", {})
-        )
-        df_master["Segmento"] = "Seg " + df_master["Segmento"].astype(str)
-        st.session_state["df_master_global"] = df_master
-        if df_master.empty:
-            st.warning("No hay coincidencias con segmentos")
-            st.stop()
-        # ==========================================
-        # AÑADIR ESTADO DE SEGMENTO DESDE TABLA CORREGIDA
-        # ==========================================
-        
-        df_corr = construir_tabla_corregida(
-            st.session_state.get("processed_sheets", {}),
-            st.session_state.get("df_mpa"),
-            material_sel,
-            sondas_seleccionadas
-        )
-        # =============================
-        # BLOQUE 1 — ANALISIS SEGMENTOS
-        # =============================
-    
-        st.subheader("Crudos y variables por segmento")
-        # ======================================
-        # ANALISIS GLOBAL DE CRUDOS
-        # ======================================
-        
-        st.markdown("## 📊 Ranking de crudos más asociados a corrosión")
-        
-        df_rank = analizar_crudos_agresividad(df_master)
-        
-        if not df_rank.empty:
-        
-            st.dataframe(df_rank)
-        
-            crudo_top = df_rank.iloc[0]["Crudo"]
-        
-            st.success(
-                f"El crudo más asociado a altas velocidades de corrosión es: **{crudo_top}**"
-            )
-        
-        else:
-            st.info("No hay suficientes datos para análisis de correlación.")
-
-        st.dataframe(df_master)
-        
-        # ======================================
-        # VARIABLES QUE EXPLICAN LA AGRESIVIDAD
-        # ======================================
-        
-        if not df_rank.empty:
-        
-            crudo_top = df_rank.iloc[0]["Crudo"]
-        
-            st.markdown(f"## 🔬 Variables que explican la agresividad de {crudo_top}")
-        
-            df_imp_crudo = analizar_variables_en_crudo(
-                df_master,
-                crudo_top,
-                st.session_state.get("vars_proceso", [])
-            )
-
-        
-            if not df_imp_crudo.empty:
-        
-                st.dataframe(df_imp_crudo)
-        
-                var_top = df_imp_crudo.iloc[0]["Variable proceso"]
-        
-                st.success(
-                    f"La variable más relacionada con el aumento de corrosión en {crudo_top} es: **{var_top}**"
-                )
-        
-            else:
-                st.info("No hay suficientes variables numéricas para análisis.")
-
-        # =============================
-        # BLOQUE 2 — BUSCADOR POR CRUDOS
-        # =============================
-    
-        st.subheader("Buscador por crudo")
-    
-        crudos_disponibles = sorted(df_master["Crudo"].dropna().unique())
-    
-        crudo_sel = st.selectbox(
-            "Selecciona crudo",
-            crudos_disponibles
-        )
-    
-        df_crudo = df_master[df_master["Crudo"] == crudo_sel]
-    
-        st.write(f"Segmentos donde aparece {crudo_sel}")
-
-        st.dataframe(df_crudo)
-    
-        # -------- Dias reales ----------
-        dias_crudo = detalle_crudos[
-            detalle_crudos["Especie"] == crudo_sel
-        ]
-        
-        # 👉 Añadir variables proceso
-        dias_crudo = añadir_proceso_a_dias_crudo(
-            dias_crudo,
-            st.session_state.get("df_proc")
-        )
-        
-        st.write("Días donde aparece el crudo")
-        st.dataframe(dias_crudo)
-
-    
-        # =============================
-        # BLOQUE 3 — Relación % crudo vs corrosión
-        # =============================
-        
-        st.subheader("Relación porcentaje crudo vs velocidad corrosión")
-        
-        if not df_crudo.empty:
-        
-            vel_media = df_crudo["Velocidad_corr"].mean()
-        
-            st.metric("Velocidad media asociada", f"{vel_media:.4f} mm/año")
-        
-            fig, ax = plt.subplots(figsize=(6,5))
-        
-            ax.scatter(
-                df_crudo["Porcentaje_promedio"],
-                df_crudo["Velocidad_corr"],
-                alpha=0.7
-            )
-        
-            ax.set_xlabel("% promedio del crudo en el segmento")
-            ax.set_ylabel("Velocidad corrosión (mm/año)")
-            ax.set_title(f"{crudo_sel} → % vs corrosión")
-        
-            ax.grid(True)
-        
-            # 🔥 Añadir recta tendencia
-            if len(df_crudo) > 1:
-        
-                x = df_crudo["Porcentaje_promedio"]
-                y = df_crudo["Velocidad_corr"]
-        
-                coef = np.polyfit(x, y, 1)
-                poly = np.poly1d(coef)
-        
-                ax.plot(x, poly(x))
-        
-            st.pyplot(fig)
-    
-        # =============================
-        # EXPORTAR
-        # =============================
-    
-        buffer = io.BytesIO()
-        df_master.to_excel(buffer, index=False)
-        buffer.seek(0)
-    
-        st.download_button(
-            "Descargar dataset completo",
-            buffer,
-            file_name="crudos_segmentos_proceso.xlsx"
-        )
-
-
 
 # -------------------- Footer --------------------
 st.markdown("---")
