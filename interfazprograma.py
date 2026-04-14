@@ -2175,23 +2175,24 @@ def detectar_segmentos_fallback(df_original, umbral_factor=1.02, umbral=0.0005, 
 def cargar_propiedades_crudos(uploaded_file):
 
     import pandas as pd
+    import unicodedata
 
     df = None
 
-    # 1️⃣ Intentar Excel moderno
+    # =========================================
+    # 1️⃣ INTENTAR LEER ARCHIVO (ROBUSTO)
+    # =========================================
     try:
         df = pd.read_excel(uploaded_file, engine="openpyxl")
     except Exception as e:
         print("openpyxl falló:", e)
 
-    # 2️⃣ Intentar Excel antiguo (.xls)
     if df is None:
         try:
             df = pd.read_excel(uploaded_file, engine="xlrd")
         except Exception as e:
             print("xlrd falló:", e)
 
-    # 3️⃣ Intentar CSV
     if df is None:
         try:
             df = pd.read_csv(uploaded_file)
@@ -2199,41 +2200,78 @@ def cargar_propiedades_crudos(uploaded_file):
             print("csv falló:", e)
             raise ValueError("No se pudo leer el archivo")
 
-    # -----------------------------
-    # LIMPIEZA
-    # -----------------------------
+    # =========================================
+    # 2️⃣ LIMPIAR NOMBRES DE COLUMNAS
+    # =========================================
     df.columns = [str(c).strip() for c in df.columns]
 
-    # DEBUG (muy útil ahora)
-    print("COLUMNAS DETECTADAS:", df.columns.tolist())
+    # =========================================
+    # 3️⃣ FUNCIÓN PARA NORMALIZAR TEXTO
+    # =========================================
+    def limpiar_texto(texto):
+        texto = str(texto).lower()
+        texto = unicodedata.normalize("NFKD", texto)
+        texto = texto.encode("ascii", "ignore").decode("utf-8")
+        return texto
 
+    # DEBUG (puedes quitar luego)
+    print("Columnas originales:", df.columns.tolist())
+    for c in df.columns:
+        print(c, "→", limpiar_texto(c))
+
+    # =========================================
+    # 4️⃣ DETECTAR COLUMNAS
+    # =========================================
     col_especie = None
     col_azufre = None
     col_tan = None
 
     for c in df.columns:
-        cl = c.lower()
 
+        cl = limpiar_texto(c)
+
+        # especie
         if "espec" in cl or "crudo" in cl:
             col_especie = c
 
+        # azufre
         if "azuf" in cl or "sulfur" in cl:
             col_azufre = c
 
-        if "neutral" in cl or "tan" in cl or "acid" in cl:
+        # TAN / NºNeutralización
+        if (
+            "neutral" in cl
+            or "acid" in cl
+            or "tan" in cl
+        ):
             col_tan = c
 
+    # =========================================
+    # 5️⃣ VALIDACIÓN
+    # =========================================
     if col_especie is None:
         raise ValueError("No se encontró columna de especie")
 
-    if col_azufre is None or col_tan is None:
-        raise ValueError(f"No se detectaron bien columnas. Columnas disponibles: {df.columns.tolist()}")
+    if col_azufre is None:
+        raise ValueError("No se encontró columna de Azufre")
 
+    if col_tan is None:
+        raise ValueError(
+            f"No se encontró columna de NºNeutralización. Columnas disponibles: {df.columns.tolist()}"
+        )
+
+    # =========================================
+    # 6️⃣ FILTRAR Y LIMPIAR
+    # =========================================
     df_final = df[[col_especie, col_azufre, col_tan]].copy()
+
     df_final.columns = ["Especie", "Azufre", "TAN"]
 
     df_final["Azufre"] = pd.to_numeric(df_final["Azufre"], errors="coerce")
     df_final["TAN"] = pd.to_numeric(df_final["TAN"], errors="coerce")
+
+    # eliminar filas vacías
+    df_final = df_final.dropna(subset=["Especie"])
 
     return df_final
 
