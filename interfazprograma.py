@@ -2203,7 +2203,7 @@ def cargar_propiedades_crudos(uploaded_file):
 
         cl = limpiar_texto(c)
 
-        if "nombre" in cl or "crudo" in cl:
+        if "codigo" in cl:
             col_especie = c
 
         if "azuf" in cl:
