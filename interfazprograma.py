@@ -198,37 +198,61 @@ def entrenar_modelos_ml(df, vars_proceso):
 
     df = df.copy()
 
-    # variables válidas
-    vars_validas = [v for v in vars_proceso if v in df.columns]
+    # =========================================
+    # ÑADIR VARIABLES DE MEZCLA SI EXISTEN
+    # =========================================
+    vars_extra = []
+
+    if "TAN_mix" in df.columns:
+        vars_extra.append("TAN_mix")
+
+    if "S_mix" in df.columns:
+        vars_extra.append("S_mix")
+
+    # interacción (MUY IMPORTANTE)
+    if "TAN_mix" in df.columns and "S_mix" in df.columns:
+        df["TANxS"] = df["TAN_mix"] * df["S_mix"]
+        vars_extra.append("TANxS")
+
+    # combinar variables
+    vars_totales = list(set(vars_proceso + vars_extra))
+
+    # =========================================
+    # VARIABLES VÁLIDAS
+    # =========================================
+    vars_validas = [v for v in vars_totales if v in df.columns]
 
     if not vars_validas:
-        return {}
+        return {}, None
 
     X = df[vars_validas].apply(pd.to_numeric, errors="coerce")
     y = pd.to_numeric(df["Velocidad experimental"], errors="coerce")
-    
+
     mask = (~X.isna().any(axis=1)) & (~y.isna())
     X = X[mask]
     y = y[mask]
 
     if len(X) < 10:
-        return {}
+        return {}, None
 
-    # =========================
+    # =========================================
     # RANDOM FOREST
-    # =========================
+    # =========================================
     try:
         rf = RandomForestRegressor(n_estimators=300, random_state=42)
         rf.fit(X, y)
+
         pred_rf = rf.predict(X)
+
         resultados["Random Forest"] = {
             "modelo": rf,
             "pred": pred_rf,
             "r2": r2_score(y, pred_rf),
             "importancias": dict(zip(X.columns, rf.feature_importances_))
         }
-    except:
-        pass
+
+    except Exception as e:
+        print("Error en Random Forest:", e)
 
     return resultados, y
 
@@ -2850,7 +2874,43 @@ def calcular_regresion(x, y):
 
     except Exception:
         return None, None, None
+def calcular_propiedades_mezcla(df_master, df_prop):
 
+    if df_master is None or df_master.empty:
+        return pd.DataFrame()
+
+    if df_prop is None or df_prop.empty:
+        return pd.DataFrame()
+
+    # 🔗 unir propiedades con % crudo
+    df = df_master.merge(
+        df_prop,
+        left_on="Crudo",
+        right_on="Especie",
+        how="left"
+    )
+
+    # convertir a numérico
+    df["Porcentaje_promedio"] = pd.to_numeric(df["Porcentaje_promedio"], errors="coerce")
+    df["TAN"] = pd.to_numeric(df["TAN"], errors="coerce")
+    df["Azufre"] = pd.to_numeric(df["Azufre"], errors="coerce")
+
+    df = df.dropna(subset=["Porcentaje_promedio"])
+
+    # pasar % a fracción
+    df["w"] = df["Porcentaje_promedio"] / 100
+
+    # =========================
+    # AGREGAR POR SEGMENTO
+    # =========================
+    df_mix = df.groupby("Segmento").apply(
+        lambda x: pd.Series({
+            "TAN_mix": (x["TAN"] * x["w"]).sum(),
+            "S_mix": (x["Azufre"] * x["w"]).sum()
+        })
+    ).reset_index()
+
+    return df_mix
 def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso,
                                        nuevo_umbral, nuevo_umbral_factor=None, min_dias=10,
                                        wl_max=51, wl_min=5):
@@ -4327,6 +4387,22 @@ with tabs[3]:
         )
     
         df_validos["Crudos"] = df_validos["Segmento"].map(mapa_crudos)
+        # =========================================
+        # AÑADIR TAN_mix y S_mix
+        # =========================================
+        
+        if "df_master_global" in st.session_state and "df_propiedades_crudos" in st.session_state:
+        
+            df_master = st.session_state["df_master_global"]
+            df_prop = st.session_state["df_propiedades_crudos"]
+        
+            df_mix = calcular_propiedades_mezcla(df_master, df_prop)
+        
+            df_validos = df_validos.merge(
+                df_mix,
+                on="Segmento",
+                how="left"
+            )
     # ===============================
     # AÑADIR CRUDOS A DESCARTADOS
     # ===============================
@@ -4450,7 +4526,7 @@ with tabs[3]:
         )  
     st.subheader("Impacto de los parámetros del crudo sobre las velocidades experimentales")
 
-    vars_proc = st.session_state.get("vars_proceso", [])
+    vars_proc = st.session_state.get("vars_proceso", []) + ["TAN_mix", "S_mix"]
     
     # ENCIMA
     st.markdown("### Velocidades medidas subestimadas")
@@ -4590,8 +4666,8 @@ with tabs[3]:
     ]
     
     variable_x = st.selectbox(
-        "Selecciona variable de proceso",
-        variables_proceso
+        "Selecciona variable",
+        ["TAN_mix", "S_mix"] + variables_proceso
     )
     import plotly.graph_objects as go
 
@@ -5138,7 +5214,7 @@ with tabs[4]:
         # =========================
         # CALCULAR IMPORTANCIAS
         # =========================
-        vars_proc = st.session_state.get("vars_proceso", [])
+        vars_proc = st.session_state.get("vars_proceso", []) + ["TAN_mix", "S_mix"]
         
         imp_ml_encima = importancia_por_subset(
             df_ml_full[df_ml_full["estado"]=="ENCIMA"],
