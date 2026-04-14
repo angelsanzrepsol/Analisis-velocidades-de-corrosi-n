@@ -2882,7 +2882,7 @@ def calcular_propiedades_mezcla(df_master, df_prop):
     if df_prop is None or df_prop.empty:
         return pd.DataFrame()
 
-    # 🔗 unir propiedades con % crudo
+    # 🔗 merge
     df = df_master.merge(
         df_prop,
         left_on="Crudo",
@@ -2890,19 +2890,38 @@ def calcular_propiedades_mezcla(df_master, df_prop):
         how="left"
     )
 
-    # convertir a numérico
-    df["Porcentaje_promedio"] = pd.to_numeric(df["Porcentaje_promedio"], errors="coerce")
-    df["TAN"] = pd.to_numeric(df["TAN"], errors="coerce")
-    df["Azufre"] = pd.to_numeric(df["Azufre"], errors="coerce")
+    # DEBUG
+    print("Columnas después del merge:", df.columns.tolist())
+
+    # =========================================
+    # 🔥 ASEGURAR COLUMNAS
+    # =========================================
+    if "TAN" not in df.columns:
+        print("⚠️ No existe TAN")
+        df["TAN"] = np.nan
+
+    if "Azufre" not in df.columns:
+        print("⚠️ No existe Azufre")
+        df["Azufre"] = np.nan
+
+    # =========================================
+    # CONVERTIR
+    # =========================================
+    df["Porcentaje_promedio"] = pd.to_numeric(
+        df.get("Porcentaje_promedio"), errors="coerce"
+    )
+
+    df["TAN"] = pd.to_numeric(df.get("TAN"), errors="coerce")
+    df["Azufre"] = pd.to_numeric(df.get("Azufre"), errors="coerce")
 
     df = df.dropna(subset=["Porcentaje_promedio"])
 
-    # pasar % a fracción
+    # evitar división rara
     df["w"] = df["Porcentaje_promedio"] / 100
 
-    # =========================
-    # AGREGAR POR SEGMENTO
-    # =========================
+    # =========================================
+    # AGRUPAR
+    # =========================================
     df_mix = df.groupby("Segmento").apply(
         lambda x: pd.Series({
             "TAN_mix": (x["TAN"] * x["w"]).sum(),
