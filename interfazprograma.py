@@ -5329,7 +5329,24 @@ with tabs[4]:
             if "df_cestas" not in locals() or df_cestas.empty:
                 st.warning("No hay df_cestas disponible")
             else:
-        
+                # =========================================================
+                # FIX NOMBRE COLUMNA TARGET
+                # =========================================================
+                
+                if "Velocidad experimental" not in df_cestas.columns:
+                
+                    if "Velocidad" in df_cestas.columns:
+                        df_cestas["Velocidad experimental"] = df_cestas["Velocidad"]
+                
+                    elif "vel_abs" in df_cestas.columns:
+                        df_cestas["Velocidad experimental"] = df_cestas["vel_abs"]
+                
+                    elif "Velocidad_corr" in df_cestas.columns:
+                        df_cestas["Velocidad experimental"] = df_cestas["Velocidad_corr"]
+                
+                    else:
+                        st.error("No se encontró ninguna columna de velocidad válida")
+                        st.stop()
                 # entrenar modelo si no existe
                 resultados_ml, y_real = entrenar_modelos_ml(df_cestas, vars_proceso)
         
