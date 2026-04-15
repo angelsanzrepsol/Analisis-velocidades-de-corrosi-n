@@ -2524,13 +2524,13 @@ def calcular_segmentos_crudo(df):
     )
 
     return resumen
-def comparar_tan(df_validos, df_master, df_prop):
+def comparar_tan(df_validos, df_master, df_prop, col_tan_proceso):
 
     if df_validos.empty:
         return pd.DataFrame()
 
     # =========================
-    # TAN MIX (de crudos)
+    # TAN MIX
     # =========================
     df_mix = calcular_propiedades_mezcla(df_master, df_prop)
 
@@ -2538,25 +2538,13 @@ def comparar_tan(df_validos, df_master, df_prop):
         return pd.DataFrame()
 
     # =========================
-    # DETECTAR TAN PROCESO
+    # USAR TAN REAL DIRECTO
     # =========================
-    col_tan_proc = None
-
-    for c in df_validos.columns:
-        cl = str(c).lower()
-
-        if "tan" in cl or "acid" in cl or "neutral" in cl:
-            col_tan_proc = c
-            break
-
-    if col_tan_proc is None:
-        print("⚠️ No se encontró TAN en df_validos")
+    if col_tan_proceso not in df_validos.columns:
+        print(f"⚠️ No existe columna {col_tan_proceso}")
         return pd.DataFrame()
 
-    # =========================
-    # CREAR TABLA BASE
-    # =========================
-    df_base = df_validos[["Segmento", col_tan_proc]].copy()
+    df_base = df_validos[["Segmento", col_tan_proceso]].copy()
     df_base.columns = ["Segmento", "TAN_proceso"]
 
     # =========================
@@ -2569,10 +2557,9 @@ def comparar_tan(df_validos, df_master, df_prop):
     )
 
     # =========================
-    # DIFERENCIAS
+    # DIFERENCIA
     # =========================
     df_comp["Dif_TAN"] = df_comp["TAN_mix"] - df_comp["TAN_proceso"]
-    df_comp["Dif_abs"] = df_comp["Dif_TAN"].abs()
 
     return df_comp
 def calcular_perfil_teorico_por_segmentos(df_filtrado, segmentos, df_mpa, material):
@@ -4367,7 +4354,8 @@ with tabs[3]:
         df_tan_comp = comparar_tan(
             df_validos,
             df_master,
-            df_prop
+            df_prop,
+            col_tan_proceso="TAN"   # 👈 CAMBIA ESTO
         )
     
         if not df_tan_comp.empty:
