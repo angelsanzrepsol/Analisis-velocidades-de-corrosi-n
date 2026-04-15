@@ -198,61 +198,37 @@ def entrenar_modelos_ml(df, vars_proceso):
 
     df = df.copy()
 
-    # =========================================
-    # ÑADIR VARIABLES DE MEZCLA SI EXISTEN
-    # =========================================
-    vars_extra = []
-
-    if "TAN_mix" in df.columns:
-        vars_extra.append("TAN_mix")
-
-    if "S_mix" in df.columns:
-        vars_extra.append("S_mix")
-
-    # interacción (MUY IMPORTANTE)
-    if "TAN_mix" in df.columns and "S_mix" in df.columns:
-        df["TANxS"] = df["TAN_mix"] * df["S_mix"]
-        vars_extra.append("TANxS")
-
-    # combinar variables
-    vars_totales = list(set(vars_proceso + vars_extra))
-
-    # =========================================
-    # VARIABLES VÁLIDAS
-    # =========================================
-    vars_validas = [v for v in vars_totales if v in df.columns]
+    # variables válidas
+    vars_validas = [v for v in vars_proceso if v in df.columns]
 
     if not vars_validas:
-        return {}, None
+        return {}
 
     X = df[vars_validas].apply(pd.to_numeric, errors="coerce")
     y = pd.to_numeric(df["Velocidad experimental"], errors="coerce")
-
+    
     mask = (~X.isna().any(axis=1)) & (~y.isna())
     X = X[mask]
     y = y[mask]
 
     if len(X) < 10:
-        return {}, None
+        return {}
 
-    # =========================================
+    # =========================
     # RANDOM FOREST
-    # =========================================
+    # =========================
     try:
         rf = RandomForestRegressor(n_estimators=300, random_state=42)
         rf.fit(X, y)
-
         pred_rf = rf.predict(X)
-
         resultados["Random Forest"] = {
             "modelo": rf,
             "pred": pred_rf,
             "r2": r2_score(y, pred_rf),
             "importancias": dict(zip(X.columns, rf.feature_importances_))
         }
-
-    except Exception as e:
-        print("Error en Random Forest:", e)
+    except:
+        pass
 
     return resultados, y
 
@@ -275,7 +251,7 @@ def clasificar_por_tolerancia(y_real, y_pred, tol):
 
     df["estado"] = df["delta"].apply(clasificar)
 
-    return df["estado"]
+    return df["estado"].values
 
 def grafica_modelo_vs_real(y_real, y_pred, titulo, tolerancia):
 
@@ -2198,93 +2174,45 @@ def detectar_segmentos_fallback(df_original, umbral_factor=1.02, umbral=0.0005, 
     return df_filtrado, np.asarray(y_suave), cambios, segmentos_raw
 def cargar_propiedades_crudos(uploaded_file):
 
-    import pandas as pd
-    import unicodedata
-    import re
-
     df = pd.read_excel(uploaded_file)
 
-    # limpiar nombres
+    # limpiar nombres de columnas
     df.columns = [str(c).strip() for c in df.columns]
 
-    # =========================
-    # NORMALIZAR TEXTO
-    # =========================
-    def limpiar_texto(texto):
-        texto = str(texto).lower()
-        texto = unicodedata.normalize("NFKD", texto)
-        texto = texto.encode("ascii", "ignore").decode("utf-8")
-        return texto
-
-    # =========================
-    # DETECTAR COLUMNAS
-    # =========================
+    # buscar columna especie (flexible)
     col_especie = None
-    col_azufre = None
-    col_tan = None
-
     for c in df.columns:
-
-        cl = limpiar_texto(c)
-
-        if "codigo" in cl:
+        if "espec" in c.lower():
             col_especie = c
-
-        if "azuf" in cl:
-            col_azufre = c
-
-        if "neutral" in cl:
-            col_tan = c
+            break
 
     if col_especie is None:
         raise ValueError("No se encontró columna de especie")
 
-    if col_azufre is None:
-        raise ValueError("No se encontró columna de Azufre")
+    # buscar columnas objetivo
+    col_azufre = None
+    col_tan = None
 
-    if col_tan is None:
-        raise ValueError("No se encontró columna de Nº Neutralización")
+    for c in df.columns:
+        cl = c.lower()
 
-    # =========================
-    # EXTRAER SOLO LO NECESARIO
-    # =========================
+        if "azuf" in cl:
+            col_azufre = c
+
+        if "neutral" in cl or "tan" in cl:
+            col_tan = c
+
+    if col_azufre is None or col_tan is None:
+        raise ValueError("No se encontraron columnas Azufre o NºNeutralización")
+
+    # quedarte solo con lo necesario
     df_final = df[[col_especie, col_azufre, col_tan]].copy()
 
     df_final.columns = ["Especie", "Azufre", "TAN"]
 
-    # =========================
-    # LIMPIAR AZUFRE
-    # =========================
+    # convertir a numérico
     df_final["Azufre"] = pd.to_numeric(df_final["Azufre"], errors="coerce")
-
-    # =========================
-    # LIMPIAR TAN (MUY IMPORTANTE)
-    # =========================
-    def extraer_numero(texto):
-
-        if pd.isna(texto):
-            return None
-
-        texto = str(texto)
-
-        # buscar números tipo 0,25 o 2.3
-        nums = re.findall(r"\d+[.,]?\d*", texto)
-
-        if not nums:
-            return None
-
-        # coger el primero (puedes cambiar a media si quieres)
-        num = nums[0].replace(",", ".")
-
-        try:
-            return float(num)
-        except:
-            return None
-
-    df_final["TAN"] = df_final["TAN"].apply(extraer_numero)
-
-    # eliminar filas vacías
-    df_final = df_final.dropna(subset=["Especie"])
+    df_final["TAN"] = pd.to_numeric(df_final["TAN"], errors="coerce")
 
     return df_final
 
@@ -2524,44 +2452,6 @@ def calcular_segmentos_crudo(df):
     )
 
     return resumen
-def comparar_tan(df_validos, df_master, df_prop, col_tan_proceso):
-
-    if df_validos.empty:
-        return pd.DataFrame()
-
-    # =========================
-    # TAN MIX
-    # =========================
-    df_mix = calcular_propiedades_mezcla(df_master, df_prop)
-
-    if df_mix.empty:
-        return pd.DataFrame()
-
-    # =========================
-    # USAR TAN REAL DIRECTO
-    # =========================
-    if col_tan_proceso not in df_validos.columns:
-        print(f"⚠️ No existe columna {col_tan_proceso}")
-        return pd.DataFrame()
-
-    df_base = df_validos[["Segmento", col_tan_proceso]].copy()
-    df_base.columns = ["Segmento", "TAN_proceso"]
-
-    # =========================
-    # MERGE
-    # =========================
-    df_comp = df_base.merge(
-        df_mix,
-        on="Segmento",
-        how="left"
-    )
-
-    # =========================
-    # DIFERENCIA
-    # =========================
-    df_comp["Dif_TAN"] = df_comp["TAN_mix"] - df_comp["TAN_proceso"]
-
-    return df_comp
 def calcular_perfil_teorico_por_segmentos(df_filtrado, segmentos, df_mpa, material):
 
     if df_mpa is None:
@@ -2912,100 +2802,7 @@ def calcular_regresion(x, y):
 
     except Exception:
         return None, None, None
-def calcular_propiedades_mezcla(df_master, df_prop):
 
-    import pandas as pd
-    import numpy as np
-    import re
-
-    if df_master is None or df_master.empty:
-        return pd.DataFrame()
-
-    if df_prop is None or df_prop.empty:
-        return pd.DataFrame()
-
-    df_master = df_master.copy()
-    df_prop = df_prop.copy()
-
-    # =========================================
-    # 🔥 NORMALIZAR NOMBRES (CLAVE TOTAL)
-    # =========================================
-    def limpiar(txt):
-        if pd.isna(txt):
-            return ""
-        txt = str(txt).upper().strip()
-        txt = re.sub(r"[^A-Z0-9]", "", txt)  # elimina TODO lo raro
-        return txt
-
-    df_master["Crudo"] = df_master["Crudo"].apply(limpiar)
-    df_prop["Especie"] = df_prop["Especie"].apply(limpiar)
-
-    # =========================================
-    # 🔗 MERGE
-    # =========================================
-    df = df_master.merge(
-        df_prop,
-        left_on="Crudo",
-        right_on="Especie",
-        how="left"
-    )
-
-    # =========================================
-    # 🔥 DETECTAR COLUMNAS REALES
-    # =========================================
-    col_tan = None
-    col_s = None
-
-    for c in df.columns:
-        cl = str(c).lower()
-
-        if col_tan is None and ("tan" in cl or "neutral" in cl or "acid" in cl):
-            col_tan = c
-
-        if col_s is None and "azuf" in cl:
-            col_s = c
-
-    # fallback seguro
-    if col_tan is None:
-        df["TAN"] = np.nan
-    else:
-        df["TAN"] = df[col_tan]
-
-    if col_s is None:
-        df["Azufre"] = np.nan
-    else:
-        df["Azufre"] = df[col_s]
-
-    # =========================================
-    # LIMPIEZA
-    # =========================================
-    df["Porcentaje_promedio"] = pd.to_numeric(
-        df["Porcentaje_promedio"], errors="coerce"
-    )
-
-    df["TAN"] = pd.to_numeric(df["TAN"], errors="coerce")
-    df["Azufre"] = pd.to_numeric(df["Azufre"], errors="coerce")
-
-    df = df.dropna(subset=["Porcentaje_promedio"])
-
-    # =========================================
-    # 🔥 PESOS
-    # =========================================
-    df["w"] = df["Porcentaje_promedio"] / 100
-
-    # =========================================
-    # 🔥 CALCULO TAN MIX REAL
-    # =========================================
-    df_mix = df.groupby("Segmento").apply(
-        lambda x: pd.Series({
-            "TAN_mix": np.nansum(x["TAN"] * x["w"]),
-            "S_mix": np.nansum(x["Azufre"] * x["w"]),
-            "n_crudos": len(x),
-            "TAN_validos": x["TAN"].notna().sum()
-        })
-    ).reset_index()
-
-    return df_mix
 def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso,
                                        nuevo_umbral, nuevo_umbral_factor=None, min_dias=10,
                                        wl_max=51, wl_min=5):
@@ -3459,26 +3256,7 @@ with tabs[0]:
                     
                                 st.success("Segmento recuperado")
                                 st.rerun()
-                        if st.button("Recuperar todos segmentos eliminados"):
-                        
-                            for key, data in st.session_state.get("processed_sheets", {}).items():
-                        
-                                descartados = data.get("descartados", [])
-                                validos = data.get("segmentos_validos", [])
-                        
-                                if not descartados:
-                                    continue
-                        
-                                # mover descartados a válidos
-                                for seg in descartados:
-                                    seg["estado"] = "recuperado"
-                                    validos.append(seg)
-                        
-                                # vaciar descartados
-                                data["descartados"] = []
-                                data["segmentos_validos"] = validos
-                        
-                            st.success("Segmentos recuperados correctamente")
+                    
                     seg_list = []
                     try:
                         seg_list = [f"{i+1}: {s.get('fecha_ini')} → {s.get('fecha_fin')}  | Vel: {s.get('vel_abs')}" for i,s in enumerate(st.session_state["processed_sheets"][key]["segmentos_validos"])]
@@ -4377,37 +4155,7 @@ with tabs[3]:
 
     st.header("Tabla corregida y control avanzado")
     st.subheader("Sondas activas para el análisis")
-    # =========================================
-    # 🔥 COMPARACIÓN TAN PROCESO vs TAN MIX
-    # =========================================
-    
-    if (
-        "df_master_global" in st.session_state and
-        "df_propiedades_crudos" in st.session_state
-    ):
-    
-        df_master = st.session_state["df_master_global"]
-        df_prop = st.session_state["df_propiedades_crudos"]
-    
-        df_tan_comp = comparar_tan(
-            df_validos,
-            df_master,
-            df_prop,
-            col_tan_proceso="TAN"   # 👈 CAMBIA ESTO
-        )
-        st.write("df_mix preview:")
-        st.write(calcular_propiedades_mezcla(df_master, df_prop).head())
-        
-        st.write("df_validos columnas:")
-        st.write(df_validos.columns)
-        if not df_tan_comp.empty:
-        
-            st.subheader("Comparación TAN proceso vs TAN mezcla")
-    
-            st.dataframe(df_tan_comp)
-    
-        else:
-            st.info("No se pudo calcular comparación TAN")
+
     processed = st.session_state.get("processed_sheets", {})
 
     # SOLO sondas guardadas
@@ -4512,22 +4260,6 @@ with tabs[3]:
         )
     
         df_validos["Crudos"] = df_validos["Segmento"].map(mapa_crudos)
-        # =========================================
-        # AÑADIR TAN_mix y S_mix
-        # =========================================
-        
-        if "df_master_global" in st.session_state and "df_propiedades_crudos" in st.session_state:
-        
-            df_master = st.session_state["df_master_global"]
-            df_prop = st.session_state["df_propiedades_crudos"]
-        
-            df_mix = calcular_propiedades_mezcla(df_master, df_prop)
-        
-            df_validos = df_validos.merge(
-                df_mix,
-                on="Segmento",
-                how="left"
-            )
     # ===============================
     # AÑADIR CRUDOS A DESCARTADOS
     # ===============================
@@ -4651,7 +4383,7 @@ with tabs[3]:
         )  
     st.subheader("Impacto de los parámetros del crudo sobre las velocidades experimentales")
 
-    vars_proc = st.session_state.get("vars_proceso", []) + ["TAN_mix", "S_mix"]
+    vars_proc = st.session_state.get("vars_proceso", [])
     
     # ENCIMA
     st.markdown("### Velocidades medidas subestimadas")
@@ -4791,8 +4523,8 @@ with tabs[3]:
     ]
     
     variable_x = st.selectbox(
-        "Selecciona variable",
-        ["TAN_mix", "S_mix"] + variables_proceso
+        "Selecciona variable de proceso",
+        variables_proceso
     )
     import plotly.graph_objects as go
 
@@ -5121,35 +4853,22 @@ with tabs[4]:
         df_estado["Segmento"] = df_estado["Segmento"]
         
         # MPA
-        df_temp = pd.DataFrame({
-            "real": df_comp["Velocidad experimental"],
-            "pred": df_comp["Velocidad esperada"]
-        }).dropna()
-        
         estado_mpa = clasificar_por_tolerancia(
-            df_temp["real"],
-            df_temp["pred"],
-            tol
+            df_comp["Velocidad experimental"],
+            df_comp["Velocidad esperada"],
+            tol   # tu tolerancia MPA
         )
         
-        df_estado["MPA"] = None
-        df_estado.loc[df_temp.index, "MPA"] = estado_mpa
+        df_estado["MPA"] = estado_mpa
         for nombre, data in modelos.items():
-
-            df_estado[nombre] = None
-        
-            df_temp_ml = pd.DataFrame({
-                "real": y_real,
-                "pred": data["pred"]
-            }).dropna()
         
             estado_modelo = clasificar_por_tolerancia(
-                df_temp_ml["real"],
-                df_temp_ml["pred"],
-                tol_ml_global
+                y_real,
+                data["pred"],
+                tol_ml_global   # 👈 el que añadimos antes
             )
         
-            df_estado.loc[df_temp_ml.index, nombre] = estado_modelo
+            df_estado[nombre] = estado_modelo
         cols_final = ["Segmento", "MPA"] + list(modelos.keys())
         df_estado_final = df_estado[cols_final]
         st.dataframe(df_estado_final)
@@ -5352,7 +5071,7 @@ with tabs[4]:
         # =========================
         # CALCULAR IMPORTANCIAS
         # =========================
-        vars_proc = st.session_state.get("vars_proceso", []) + ["TAN_mix", "S_mix"]
+        vars_proc = st.session_state.get("vars_proceso", [])
         
         imp_ml_encima = importancia_por_subset(
             df_ml_full[df_ml_full["estado"]=="ENCIMA"],
