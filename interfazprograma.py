@@ -5314,6 +5314,177 @@ with tabs[4]:
         # 🔗 aquí sí coincide 1:1
         df_ml_full = df_model.copy().reset_index(drop=True)
         df_ml_full["estado"] = df_ml["estado"]
+        # =========================================================
+        # 🔥 ANALISIS AVANZADO MODELO VS CRUDOS (PRO)
+        # =========================================================
+        
+        st.subheader("🧠 Análisis avanzado: modelo vs crudos")
+        
+        try:
+        
+            # ============================================
+            # 1️⃣ DATOS BASE
+            # ============================================
+        
+            if "df_cestas" not in locals() or df_cestas.empty:
+                st.warning("No hay df_cestas disponible")
+            else:
+        
+                # entrenar modelo si no existe
+                resultados_ml, y_real = entrenar_modelos_ml(df_cestas, vars_proceso)
+        
+                if not resultados_ml:
+                    st.warning("No hay modelo ML disponible")
+                else:
+        
+                    modelo_nombre = list(resultados_ml.keys())[0]
+                    modelo_data = resultados_ml[modelo_nombre]
+        
+                    y_pred = modelo_data["pred"]
+        
+                    st.write(f"Modelo usado: {modelo_nombre}")
+                    st.write(f"R²: {modelo_data['r2']:.3f}")
+        
+                    # ============================================
+                    # 2️⃣ CLASIFICACION
+                    # ============================================
+        
+                    tol = st.slider("Tolerancia modelo", 0.0, 0.5, 0.05)
+        
+                    estados = clasificar_por_tolerancia(y_real, y_pred, tol)
+        
+                    df_model = pd.DataFrame({
+                        "real": y_real,
+                        "pred": y_pred,
+                        "estado": estados
+                    })
+        
+                    # unir con cestas
+                    df_cestas_model = df_cestas.copy()
+                    df_cestas_model["Estado_modelo"] = estados
+        
+                    # ============================================
+                    # 3️⃣ FILTRO DEBAJO
+                    # ============================================
+        
+                    df_debajo = df_cestas_model[
+                        df_cestas_model["Estado_modelo"] == "DEBAJO"
+                    ]
+        
+                    st.write(f"Segmentos DEBAJO: {len(df_debajo)}")
+        
+                    # ============================================
+                    # 4️⃣ TABLA CESTAS (CRUDO DENTRO)
+                    # ============================================
+        
+                    st.markdown("### 📦 Composición de cestas (DEBAJO modelo)")
+        
+                    tabla_cestas = analisis_porcentaje_crudos_top_cestas(
+                        df_debajo,
+                        detalle_crudos
+                    )
+        
+                    if not tabla_cestas.empty:
+                        st.dataframe(tabla_cestas)
+                    else:
+                        st.info("No hay datos de cestas")
+        
+                    # ============================================
+                    # 5️⃣ DATASET MASTER CRUDOS
+                    # ============================================
+        
+                    df_master = construir_dataset_crudos_segmentos(
+                        detalle_crudos,
+                        st.session_state.get("processed_sheets", {})
+                    )
+        
+                    if df_master.empty:
+                        st.warning("No se pudo construir dataset de crudos")
+                    else:
+        
+                        # filtrar segmentos debajo
+                        segmentos_debajo = df_debajo["Segmento"].unique()
+        
+                        df_debajo_master = df_master[
+                            df_master["Segmento"].isin(segmentos_debajo)
+                        ]
+        
+                        # ============================================
+                        # 6️⃣ TABLA GLOBAL CRUDOS
+                        # ============================================
+        
+                        st.markdown("### 🌍 Crudos presentes (% global)")
+        
+                        tabla_global = (
+                            df_debajo_master
+                            .groupby("Crudo")["Porcentaje_promedio"]
+                            .mean()
+                            .sort_values(ascending=False)
+                            .reset_index()
+                        )
+        
+                        st.dataframe(tabla_global)
+        
+                        # ============================================
+                        # 7️⃣ ANALISIS AGRESIVIDAD
+                        # ============================================
+        
+                        st.markdown("### ☠️ Ranking de agresividad de crudos")
+        
+                        ranking = analizar_crudos_agresividad(df_debajo_master)
+        
+                        if not ranking.empty:
+                            st.dataframe(ranking)
+                        else:
+                            st.info("No hay suficiente información")
+        
+                        # ============================================
+                        # 8️⃣ GRAFICAS ESPECIE vs CORROSION
+                        # ============================================
+        
+                        st.markdown("### 📈 Relación especie vs corrosión")
+        
+                        crudos_disponibles = df_debajo_master["Crudo"].unique()
+        
+                        crudo_sel = st.selectbox(
+                            "Selecciona crudo",
+                            crudos_disponibles
+                        )
+        
+                        df_plot = df_debajo_master[
+                            df_debajo_master["Crudo"] == crudo_sel
+                        ].rename(columns={
+                            "Porcentaje_promedio": "% especie",
+                            "Velocidad_corr": "Velocidad"
+                        })
+        
+                        fig = graficar_especie_vs_corrosion(df_plot, crudo_sel)
+        
+                        if fig:
+                            st.plotly_chart(fig, use_container_width=True)
+        
+                        # ============================================
+                        # 9️⃣ INTERPRETACION AUTOMATICA
+                        # ============================================
+        
+                        st.markdown("### 🧠 Interpretación automática")
+        
+                        if not ranking.empty:
+        
+                            top = ranking.iloc[0]
+        
+                            st.write(f"""
+                            🔥 Crudo más agresivo: **{top['Crudo']}**
+                            
+                            - Correlación: {top['Correlación % vs corrosión']:.3f}
+                            - Velocidad ponderada: {top['Velocidad media ponderada']:.3f}
+                            - Score: {top['Score agresividad']:.3f}
+                            
+                            👉 Este crudo tiene mayor impacto en la corrosión real.
+                            """)
+        
+        except Exception as e:
+            st.error(f"Error en análisis avanzado: {e}")
         # =========================================
         # 🔎 ANÁLISIS AVANZADO POR CESTAS
         # =========================================
