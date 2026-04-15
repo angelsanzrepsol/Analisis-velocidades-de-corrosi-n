@@ -2914,8 +2914,8 @@ def calcular_regresion(x, y):
         return None, None, None
 def calcular_propiedades_mezcla(df_master, df_prop):
 
-    import numpy as np
     import pandas as pd
+    import numpy as np
 
     if df_master is None or df_master.empty:
         return pd.DataFrame()
@@ -2924,8 +2924,11 @@ def calcular_propiedades_mezcla(df_master, df_prop):
         return pd.DataFrame()
 
     # =========================================
-    # 🔥 NORMALIZAR CLAVES
+    # 🔥 NORMALIZAR CLAVES (CLAVE DEL ÉXITO)
     # =========================================
+    df_master = df_master.copy()
+    df_prop = df_prop.copy()
+
     df_master["Crudo"] = df_master["Crudo"].astype(str).str.strip().str.upper()
     df_prop["Especie"] = df_prop["Especie"].astype(str).str.strip().str.upper()
 
@@ -2939,27 +2942,64 @@ def calcular_propiedades_mezcla(df_master, df_prop):
         how="left"
     )
 
-    # DEBUG
-    print("Merge preview:")
-    print("COLUMNAS DF:", df.columns.tolist())
-    cols_debug = [c for c in ["Crudo", "Especie", "TAN", "Azufre"] if c in df.columns]
-    print(df[cols_debug].head(10))
+    print("Columnas tras merge:", df.columns.tolist())
 
     # =========================================
-    # LIMPIEZA
+    # 🔥 DETECTAR TAN DINÁMICAMENTE
     # =========================================
-    df["Porcentaje_promedio"] = pd.to_numeric(df["Porcentaje_promedio"], errors="coerce")
+    col_tan = None
+
+    for c in df.columns:
+        cl = str(c).lower()
+
+        if "tan" in cl or "neutral" in cl or "acid" in cl:
+            col_tan = c
+            break
+
+    if col_tan is None:
+        print("❌ No se encontró columna TAN")
+        df["TAN"] = np.nan
+    else:
+        df["TAN"] = df[col_tan]
+        print(f"✅ TAN detectado en: {col_tan}")
+
+    # =========================================
+    # 🔥 DETECTAR AZUFRE
+    # =========================================
+    col_s = None
+
+    for c in df.columns:
+        if "azuf" in str(c).lower():
+            col_s = c
+            break
+
+    if col_s is None:
+        print("❌ No se encontró Azufre")
+        df["Azufre"] = np.nan
+    else:
+        df["Azufre"] = df[col_s]
+        print(f"✅ Azufre detectado en: {col_s}")
+
+    # =========================================
+    # LIMPIEZA NUMÉRICA
+    # =========================================
+    df["Porcentaje_promedio"] = pd.to_numeric(
+        df["Porcentaje_promedio"], errors="coerce"
+    )
+
     df["TAN"] = pd.to_numeric(df["TAN"], errors="coerce")
     df["Azufre"] = pd.to_numeric(df["Azufre"], errors="coerce")
 
     # quitar filas sin %
     df = df.dropna(subset=["Porcentaje_promedio"])
 
-    # pesos
+    # =========================================
+    # 🔥 PESOS
+    # =========================================
     df["w"] = df["Porcentaje_promedio"] / 100
 
     # =========================================
-    # 🔥 CALCULO CORRECTO
+    # 🔥 CÁLCULO REAL (MEDIA PONDERADA)
     # =========================================
     df_mix = df.groupby("Segmento").apply(
         lambda x: pd.Series({
@@ -2969,6 +3009,9 @@ def calcular_propiedades_mezcla(df_master, df_prop):
             "TAN_validos": x["TAN"].notna().sum()
         })
     ).reset_index()
+
+    print("Resultado mezcla:")
+    print(df_mix.head())
 
     return df_mix
 def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso,
