@@ -2914,13 +2914,24 @@ def calcular_regresion(x, y):
         return None, None, None
 def calcular_propiedades_mezcla(df_master, df_prop):
 
+    import numpy as np
+    import pandas as pd
+
     if df_master is None or df_master.empty:
         return pd.DataFrame()
 
     if df_prop is None or df_prop.empty:
         return pd.DataFrame()
 
-    # 🔗 merge
+    # =========================================
+    # 🔥 NORMALIZAR CLAVES
+    # =========================================
+    df_master["Crudo"] = df_master["Crudo"].astype(str).str.strip().str.upper()
+    df_prop["Especie"] = df_prop["Especie"].astype(str).str.strip().str.upper()
+
+    # =========================================
+    # 🔗 MERGE
+    # =========================================
     df = df_master.merge(
         df_prop,
         left_on="Crudo",
@@ -2929,41 +2940,31 @@ def calcular_propiedades_mezcla(df_master, df_prop):
     )
 
     # DEBUG
-    print("Columnas después del merge:", df.columns.tolist())
+    print("Merge preview:")
+    print(df[["Crudo", "Especie", "TAN"]].head(10))
 
     # =========================================
-    # 🔥 ASEGURAR COLUMNAS
+    # LIMPIEZA
     # =========================================
-    if "TAN" not in df.columns:
-        print("⚠️ No existe TAN")
-        df["TAN"] = np.nan
+    df["Porcentaje_promedio"] = pd.to_numeric(df["Porcentaje_promedio"], errors="coerce")
+    df["TAN"] = pd.to_numeric(df["TAN"], errors="coerce")
+    df["Azufre"] = pd.to_numeric(df["Azufre"], errors="coerce")
 
-    if "Azufre" not in df.columns:
-        print("⚠️ No existe Azufre")
-        df["Azufre"] = np.nan
-
-    # =========================================
-    # CONVERTIR
-    # =========================================
-    df["Porcentaje_promedio"] = pd.to_numeric(
-        df.get("Porcentaje_promedio"), errors="coerce"
-    )
-
-    df["TAN"] = pd.to_numeric(df.get("TAN"), errors="coerce")
-    df["Azufre"] = pd.to_numeric(df.get("Azufre"), errors="coerce")
-
+    # quitar filas sin %
     df = df.dropna(subset=["Porcentaje_promedio"])
 
-    # evitar división rara
+    # pesos
     df["w"] = df["Porcentaje_promedio"] / 100
 
     # =========================================
-    # AGRUPAR
+    # 🔥 CALCULO CORRECTO
     # =========================================
     df_mix = df.groupby("Segmento").apply(
         lambda x: pd.Series({
-            "TAN_mix": (x["TAN"] * x["w"]).sum(),
-            "S_mix": (x["Azufre"] * x["w"]).sum()
+            "TAN_mix": np.nansum(x["TAN"] * x["w"]),
+            "S_mix": np.nansum(x["Azufre"] * x["w"]),
+            "n_crudos": len(x),
+            "TAN_validos": x["TAN"].notna().sum()
         })
     ).reset_index()
 
