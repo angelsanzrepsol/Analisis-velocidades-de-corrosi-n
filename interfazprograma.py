@@ -2941,7 +2941,9 @@ def calcular_propiedades_mezcla(df_master, df_prop):
 
     # DEBUG
     print("Merge preview:")
-    print(df[["Crudo", "Especie", "TAN"]].head(10))
+    print("COLUMNAS DF:", df.columns.tolist())
+    cols_debug = [c for c in ["Crudo", "Especie", "TAN", "Azufre"] if c in df.columns]
+    print(df[cols_debug].head(10))
 
     # =========================================
     # LIMPIEZA
