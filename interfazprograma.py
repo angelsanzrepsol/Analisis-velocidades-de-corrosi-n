@@ -2916,6 +2916,7 @@ def calcular_propiedades_mezcla(df_master, df_prop):
 
     import pandas as pd
     import numpy as np
+    import re
 
     if df_master is None or df_master.empty:
         return pd.DataFrame()
@@ -2923,14 +2924,21 @@ def calcular_propiedades_mezcla(df_master, df_prop):
     if df_prop is None or df_prop.empty:
         return pd.DataFrame()
 
-    # =========================================
-    # 🔥 NORMALIZAR CLAVES (CLAVE DEL ÉXITO)
-    # =========================================
     df_master = df_master.copy()
     df_prop = df_prop.copy()
 
-    df_master["Crudo"] = df_master["Crudo"].astype(str).str.strip().str.upper()
-    df_prop["Especie"] = df_prop["Especie"].astype(str).str.strip().str.upper()
+    # =========================================
+    # 🔥 NORMALIZAR NOMBRES (CLAVE TOTAL)
+    # =========================================
+    def limpiar(txt):
+        if pd.isna(txt):
+            return ""
+        txt = str(txt).upper().strip()
+        txt = re.sub(r"[^A-Z0-9]", "", txt)  # elimina TODO lo raro
+        return txt
+
+    df_master["Crudo"] = df_master["Crudo"].apply(limpiar)
+    df_prop["Especie"] = df_prop["Especie"].apply(limpiar)
 
     # =========================================
     # 🔗 MERGE
@@ -2942,46 +2950,34 @@ def calcular_propiedades_mezcla(df_master, df_prop):
         how="left"
     )
 
-    print("Columnas tras merge:", df.columns.tolist())
-
     # =========================================
-    # 🔥 DETECTAR TAN DINÁMICAMENTE
+    # 🔥 DETECTAR COLUMNAS REALES
     # =========================================
     col_tan = None
+    col_s = None
 
     for c in df.columns:
         cl = str(c).lower()
 
-        if "tan" in cl or "neutral" in cl or "acid" in cl:
+        if col_tan is None and ("tan" in cl or "neutral" in cl or "acid" in cl):
             col_tan = c
-            break
 
+        if col_s is None and "azuf" in cl:
+            col_s = c
+
+    # fallback seguro
     if col_tan is None:
-        print("❌ No se encontró columna TAN")
         df["TAN"] = np.nan
     else:
         df["TAN"] = df[col_tan]
-        print(f"✅ TAN detectado en: {col_tan}")
-
-    # =========================================
-    # 🔥 DETECTAR AZUFRE
-    # =========================================
-    col_s = None
-
-    for c in df.columns:
-        if "azuf" in str(c).lower():
-            col_s = c
-            break
 
     if col_s is None:
-        print("❌ No se encontró Azufre")
         df["Azufre"] = np.nan
     else:
         df["Azufre"] = df[col_s]
-        print(f"✅ Azufre detectado en: {col_s}")
 
     # =========================================
-    # LIMPIEZA NUMÉRICA
+    # LIMPIEZA
     # =========================================
     df["Porcentaje_promedio"] = pd.to_numeric(
         df["Porcentaje_promedio"], errors="coerce"
@@ -2990,7 +2986,6 @@ def calcular_propiedades_mezcla(df_master, df_prop):
     df["TAN"] = pd.to_numeric(df["TAN"], errors="coerce")
     df["Azufre"] = pd.to_numeric(df["Azufre"], errors="coerce")
 
-    # quitar filas sin %
     df = df.dropna(subset=["Porcentaje_promedio"])
 
     # =========================================
@@ -2999,7 +2994,7 @@ def calcular_propiedades_mezcla(df_master, df_prop):
     df["w"] = df["Porcentaje_promedio"] / 100
 
     # =========================================
-    # 🔥 CÁLCULO REAL (MEDIA PONDERADA)
+    # 🔥 CALCULO TAN MIX REAL
     # =========================================
     df_mix = df.groupby("Segmento").apply(
         lambda x: pd.Series({
@@ -3009,9 +3004,6 @@ def calcular_propiedades_mezcla(df_master, df_prop):
             "TAN_validos": x["TAN"].notna().sum()
         })
     ).reset_index()
-
-    print("Resultado mezcla:")
-    print(df_mix.head())
 
     return df_mix
 def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, vars_proceso,
@@ -4403,9 +4395,13 @@ with tabs[3]:
             df_prop,
             col_tan_proceso="TAN"   # 👈 CAMBIA ESTO
         )
-    
+        st.write("df_mix preview:")
+        st.write(calcular_propiedades_mezcla(df_master, df_prop).head())
+        
+        st.write("df_validos columnas:")
+        st.write(df_validos.columns)
         if not df_tan_comp.empty:
-    
+        
             st.subheader("Comparación TAN proceso vs TAN mezcla")
     
             st.dataframe(df_tan_comp)
