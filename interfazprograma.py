@@ -275,7 +275,7 @@ def clasificar_por_tolerancia(y_real, y_pred, tol):
 
     df["estado"] = df["delta"].apply(clasificar)
 
-    return df["estado"].values
+    return df["estado"]
 
 def grafica_modelo_vs_real(y_real, y_pred, titulo, tolerancia):
 
@@ -5121,22 +5121,35 @@ with tabs[4]:
         df_estado["Segmento"] = df_estado["Segmento"]
         
         # MPA
+        df_temp = pd.DataFrame({
+            "real": df_comp["Velocidad experimental"],
+            "pred": df_comp["Velocidad esperada"]
+        }).dropna()
+        
         estado_mpa = clasificar_por_tolerancia(
-            df_comp["Velocidad experimental"],
-            df_comp["Velocidad esperada"],
-            tol   # tu tolerancia MPA
+            df_temp["real"],
+            df_temp["pred"],
+            tol
         )
         
-        df_estado["MPA"] = estado_mpa
+        df_estado["MPA"] = None
+        df_estado.loc[df_temp.index, "MPA"] = estado_mpa
         for nombre, data in modelos.items():
+
+            df_estado[nombre] = None
+        
+            df_temp_ml = pd.DataFrame({
+                "real": y_real,
+                "pred": data["pred"]
+            }).dropna()
         
             estado_modelo = clasificar_por_tolerancia(
-                y_real,
-                data["pred"],
-                tol_ml_global   # 👈 el que añadimos antes
+                df_temp_ml["real"],
+                df_temp_ml["pred"],
+                tol_ml_global
             )
         
-            df_estado[nombre] = estado_modelo
+            df_estado.loc[df_temp_ml.index, nombre] = estado_modelo
         cols_final = ["Segmento", "MPA"] + list(modelos.keys())
         df_estado_final = df_estado[cols_final]
         st.dataframe(df_estado_final)
