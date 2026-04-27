@@ -5943,7 +5943,77 @@ with tabs[4]:
             st.write(f"Correlación: {corr_tan:.3f}")
     
         st.subheader("Correlación directa especies vs corrosión")
-    
+        df_base_corr["estado"] = df_ml["estado"].values
+        # =========================================
+        # 🔥 TAN_mix vs corrosión por estado
+        # =========================================
+        # =========================================
+        # 🔎 BUSCADOR DE ESPECIES
+        # =========================================
+        
+        st.subheader("🔎 Análisis detallado por especie")
+        
+        especies_disp = [c.replace("ESP_", "") for c in cols_validas]
+        
+        esp_sel = st.selectbox(
+            "Selecciona especie",
+            especies_disp
+        )
+        
+        col_sel = f"ESP_{esp_sel}"
+        
+        df_esp = df_base_corr[[col_sel, "Velocidad experimental"]].copy()
+        
+        # solo donde está presente
+        df_esp = df_esp[df_esp[col_sel] > 0]
+        
+        if not df_esp.empty:
+        
+            st.write("Número de veces presente:", len(df_esp))
+        
+            # porcentaje medio
+            pct_mean = df_esp[col_sel].mean()
+            st.write(f"% medio: {pct_mean:.3f}")
+        
+            # distribución
+            st.markdown("### Distribución de %")
+            st.dataframe(df_esp[[col_sel]].describe())
+        
+            # ver casos
+            st.markdown("### Casos individuales")
+            st.dataframe(df_esp)
+        
+        else:
+            st.info("Esa especie no aparece en los datos")
+        st.subheader("🔥 Relación TAN_mix vs corrosión (por tipo de error)")
+        
+        # asegurar que existe
+        if "TAN_mix" not in df_base_corr.columns:
+            st.warning("No existe TAN_mix en el dataset")
+        else:
+        
+            # -----------------------------
+            # 🔴 SUBESTIMA
+            # -----------------------------
+            df_sub = df_base_corr[df_base_corr["estado"] == "SUBESTIMA"]
+        
+            if len(df_sub) > 2:
+                corr_sub = df_sub["TAN_mix"].corr(df_sub["Velocidad experimental"])
+                st.write(f"🔴 SUBESTIMA → Correlación TAN_mix: {corr_sub:.3f}")
+            else:
+                st.info("🔴 No hay suficientes datos en SUBESTIMA")
+        
+        
+            # -----------------------------
+            # 🔵 SOBREESTIMA
+            # -----------------------------
+            df_sobre = df_base_corr[df_base_corr["estado"] == "SOBREESTIMA"]
+        
+            if len(df_sobre) > 2:
+                corr_sobre = df_sobre["TAN_mix"].corr(df_sobre["Velocidad experimental"])
+                st.write(f"🔵 SOBREESTIMA → Correlación TAN_mix: {corr_sobre:.3f}")
+            else:
+                st.info("🔵 No hay suficientes datos en SOBREESTIMA")
         
 # -------------------- Footer --------------------
 st.markdown("---")
