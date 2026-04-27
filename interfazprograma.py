@@ -4804,13 +4804,15 @@ with tabs[4]:
     
         st.subheader("Modelo de datos (Machine Learning)")
     
-        modelos, y_real = entrenar_modelos_ml(
+        res = entrenar_modelos_ml(
             df_comp,
             st.session_state.get("vars_proceso", [])
         )
-        if not modelos:
-            st.warning("No hay suficientes datos para ML")
+        if not res or len(res) != 2:
+            st.warning("Error en entrenamiento ML")
             st.stop()
+        
+        modelos, y_real = res
     
         mejor_modelo = None
         mejor_r2 = -999
@@ -4979,10 +4981,15 @@ with tabs[4]:
         
         df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
     
-        modelos, y_real = entrenar_modelos_ml(
+        res = entrenar_modelos_ml(
             df_comp,
             st.session_state.get("vars_proceso", [])
         )
+        if not res or len(res) != 2:
+            st.warning("Error en entrenamiento ML")
+            st.stop()
+        
+        modelos, y_real = res
         st.plotly_chart(fig, use_container_width=True)
         # =========================================
         # 🔎 ANÁLISIS SUB / SOBRE ESTIMACIÓN (ML vs MPA)
@@ -5202,7 +5209,7 @@ with tabs[4]:
         # DATASET
         # =========================
         df_model = construir_dataset_modelo_cestas(df_cestas)
-    
+        
         st.subheader("Dataset de cestas")
         st.dataframe(df_model)
     
@@ -5221,14 +5228,15 @@ with tabs[4]:
         # =========================
         # MODELOS ML
         # =========================
-        modelos, y_real = entrenar_modelos_ml(
-            df_model,
-            vars_modelo
+        res = entrenar_modelos_ml(
+            df_comp,
+            st.session_state.get("vars_proceso", [])
         )
-    
-        if not modelos:
-            st.warning("No hay suficientes datos para ML")
+        if not res or len(res) != 2:
+            st.warning("Error en entrenamiento ML")
             st.stop()
+        
+        modelos, y_real = res
     
         mejor_modelo = None
         mejor_r2 = -999
