@@ -5988,6 +5988,29 @@ with tabs[4]:
         st.subheader("🔥 Relación TAN_mix vs corrosión (por tipo de error)")
         
         # asegurar que existe
+        # =========================================
+        # 🔧 RECONSTRUIR TAN_mix EN df_base_corr
+        # =========================================
+        
+        cols_pct = [c for c in df_base_corr.columns if c.startswith("CRUDO_")]
+        cols_tan = [c for c in df_base_corr.columns if c.startswith("TAN_CRUDO_")]
+        
+        crudos = [c.replace("CRUDO_", "") for c in cols_pct]
+        
+        for crudo in crudos:
+        
+            col_pct = f"CRUDO_{crudo}"
+            col_tan = f"TAN_CRUDO_{crudo}"
+        
+            if col_pct in df_base_corr.columns and col_tan in df_base_corr.columns:
+                df_base_corr[f"Ci_{crudo}"] = (
+                    df_base_corr[col_pct] * df_base_corr[col_tan]
+                )
+        
+        cols_ci = [c for c in df_base_corr.columns if c.startswith("Ci_")]
+        
+        if cols_ci:
+            df_base_corr["TAN_mix"] = df_base_corr[cols_ci].sum(axis=1)
         if "TAN_mix" not in df_base_corr.columns:
             st.warning("No existe TAN_mix en el dataset")
         else:
