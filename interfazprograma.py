@@ -5816,7 +5816,7 @@ with tabs[4]:
     
                     sub = df_model[[col, "Velocidad experimental"]].dropna()
     
-                    if len(sub) < 3 or sub[col].sum() < 3:
+                    if len(sub) < 2 or sub[col].sum() < 0:
                         continue
     
                     corr = np.corrcoef(
