@@ -5796,6 +5796,29 @@ with tabs[4]:
         df_sobre = df_ml_full[df_ml_full["estado"]=="SOBREESTIMA"]
         
         analizar_grupo(df_sobre, "🔵 Cestas SOBREESTIMADAS")
+        # =========================================
+        # 🧪 DATASET BASE PARA CORRELACIÓN (SIN FILTRO)
+        # =========================================
+        df_base_corr = df_model.copy()
+        
+        st.subheader("DEBUG correlación")
+        
+        st.write("Filas totales:", len(df_base_corr))
+        
+        for col in df_base_corr.columns:
+            if col.startswith("ESP_"):
+                st.write(col, "→ casos >0:", (df_base_corr[col] > 0).sum())
+        # =========================================
+        # 🔎 FILTRAR ESPECIES CON DATOS
+        # =========================================
+        cols_validas = []
+        
+        for col in df_base_corr.columns:
+            if col.startswith("ESP_"):
+                if (df_base_corr[col] > 0).sum() >= 3:
+                    cols_validas.append(col)
+        
+        st.write("Especies válidas:", cols_validas)
         # =========================
         # IMPORTANCIA ESPECIES
         # =========================
@@ -5856,7 +5879,47 @@ with tabs[4]:
                 ascending=False
             )
     
-        df_corr = analizar_especies_directo(df_model)
+        # =========================================
+        # 📊 CORRELACIÓN ESPECIES vs CORROSIÓN (ROBUSTA)
+        # =========================================
+        
+        resultados = []
+        
+        for col in cols_validas:
+        
+            sub = df_base_corr[[col, "Velocidad experimental"]].dropna()
+        
+            if len(sub) < 3:
+                continue
+        
+            corr = np.corrcoef(
+                sub[col],
+                sub["Velocidad experimental"]
+            )[0,1]
+        
+            resultados.append({
+                "Especie": col.replace("ESP_", ""),
+                "Correlacion": corr
+            })
+        
+        df_corr = pd.DataFrame(resultados)
+        
+        st.subheader("Correlación directa especies vs corrosión")
+        
+        if not df_corr.empty:
+            st.dataframe(df_corr.sort_values("Correlacion", key=abs, ascending=False))
+        else:
+            st.info("No hay suficientes datos para correlación")
+        # =========================================
+        # 🔥 CORRELACIÓN TAN MIX (MUCHO MÁS ROBUSTA)
+        # =========================================
+        
+        if "TAN_mix" in df_model.columns:
+        
+            corr_tan = df_model["TAN_mix"].corr(df_model["Velocidad experimental"])
+        
+            st.subheader("Relación TAN mezcla vs corrosión")
+            st.write(f"Correlación: {corr_tan:.3f}")
     
         st.subheader("Correlación directa especies vs corrosión")
     
