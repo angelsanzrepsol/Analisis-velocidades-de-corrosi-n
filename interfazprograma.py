@@ -5230,7 +5230,123 @@ with tabs[4]:
         # DATASET
         # =========================
         df_model = construir_dataset_modelo_cestas(df_cestas)
+        # =========================================
+        # 🧪 CONSTRUIR VARIABLES TAN POR CRUDO
+        # =========================================
         
+        # Detectar columnas
+        cols_pct = [c for c in df_model.columns if c.startswith("CRUDO_")]
+        cols_tan = [c for c in df_model.columns if c.startswith("TAN_CRUDO_")]
+        
+        # Mapear crudos
+        crudos = [c.replace("CRUDO_", "") for c in cols_pct]
+        
+        # Crear Ci = % * TAN
+        for crudo in crudos:
+        
+            col_pct = f"CRUDO_{crudo}"
+            col_tan = f"TAN_CRUDO_{crudo}"
+        
+            if col_pct in df_model.columns and col_tan in df_model.columns:
+        
+                df_model[f"Ci_{crudo}"] = (
+                    df_model[col_pct] * df_model[col_tan]
+                )
+        
+        # TAN mezcla estimado
+        cols_ci = [c for c in df_model.columns if c.startswith("Ci_")]
+        
+        if cols_ci:
+            df_model["TAN_mix"] = df_model[cols_ci].sum(axis=1)
+        # =========================================
+        # 🔵 MODELO: CRUDO → TAN PROCESO
+        # =========================================
+        
+        if "TAN_proceso" in df_model.columns and cols_ci:
+        
+            modelos_tan, y_tan = entrenar_modelos_ml(
+                df_model.rename(columns={"TAN_proceso": "target"}),
+                cols_ci
+            )
+        
+            if modelos_tan:
+                st.subheader("Modelo: Crudos → TAN proceso")
+        
+                for nombre, data in modelos_tan.items():
+        
+                    st.markdown(f"**{nombre} (R²={data['r2']:.3f})**")
+        
+                    fig = grafica_modelo_vs_real(
+                        y_tan,
+                        data["pred"],
+                        "TAN proceso",
+                        tolerancia=0
+                    )
+        
+                    st.plotly_chart(fig, use_container_width=True)
+        
+                # guardar mejor modelo TAN
+                mejor_tan = max(modelos_tan.items(), key=lambda x: x[1]["r2"])
+                importancias_tan = mejor_tan[1]["importancias"]
+        
+                df_imp_tan = pd.DataFrame({
+                    "Crudo": [k.replace("Ci_", "") for k in importancias_tan.keys()],
+                    "Impacto en TAN": importancias_tan.values()
+                }).sort_values("Impacto en TAN", ascending=False)
+        
+                st.dataframe(df_imp_tan)
+        # =========================================
+        # 🔴 MODELO: TAN → CORROSIÓN
+        # =========================================
+        
+        if "TAN_proceso" in df_model.columns:
+        
+            modelos_corr, y_corr = entrenar_modelos_ml(
+                df_model.rename(columns={"Velocidad experimental": "target"}),
+                ["TAN_proceso"]
+            )
+        
+            if modelos_corr:
+        
+                st.subheader("Modelo: TAN → Corrosión")
+        
+                for nombre, data in modelos_corr.items():
+        
+                    st.markdown(f"**{nombre} (R²={data['r2']:.3f})**")
+        
+                    fig = grafica_modelo_vs_real(
+                        y_corr,
+                        data["pred"],
+                        "Corrosión vs TAN",
+                        tolerancia=0
+                    )
+        
+                    st.plotly_chart(fig, use_container_width=True)
+        
+                mejor_corr = max(modelos_corr.items(), key=lambda x: x[1]["r2"])
+                alpha = list(mejor_corr[1]["importancias"].values())[0]
+        # =========================================
+        # 🧠 IMPACTO TOTAL CRUDO EN CORROSIÓN
+        # =========================================
+        
+        if "importancias_tan" in locals() and "alpha" in locals():
+        
+            impacto_total = []
+        
+            for var, beta in importancias_tan.items():
+        
+                impacto_total.append({
+                    "Crudo": var.replace("Ci_", ""),
+                    "Impacto en TAN": beta,
+                    "Impacto TAN→Corrosión": alpha,
+                    "Impacto total": beta * alpha
+                })
+        
+            df_impacto = pd.DataFrame(impacto_total)\
+                .sort_values("Impacto total", ascending=False)
+        
+            st.subheader("🔥 Impacto REAL de cada crudo en corrosión")
+            st.dataframe(df_impacto)
         st.subheader("Dataset de cestas")
         st.dataframe(df_model)
     
