@@ -4803,7 +4803,28 @@ with tabs[4]:
         # =========================
     
         st.subheader("Modelo de datos (Machine Learning)")
-    
+        st.subheader("DEBUG ML")
+
+        st.write("Shape df:", df_comp.shape)
+        
+        vars_modelo = st.session_state.get("vars_proceso", [])
+        st.write("Variables modelo:", vars_modelo)
+        
+        # comprobar columnas existentes
+        faltantes = [v for v in vars_modelo if v not in df_comp.columns]
+        st.write("Variables que NO están en df:", faltantes)
+        
+        # NaNs
+        st.write("NaNs por columna:")
+        st.write(df_comp[vars_modelo + ["Velocidad experimental"]].isna().sum())
+        
+        # variabilidad
+        st.write("STD variables:")
+        st.write(df_comp[vars_modelo].std())
+        
+        # target
+        st.write("Target describe:")
+        st.write(df_comp["Velocidad experimental"].describe())
         res = entrenar_modelos_ml(
             df_comp,
             st.session_state.get("vars_proceso", [])
