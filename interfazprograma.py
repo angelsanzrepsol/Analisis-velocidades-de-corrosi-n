@@ -5948,43 +5948,73 @@ with tabs[4]:
         # 🔥 TAN_mix vs corrosión por estado
         # =========================================
         # =========================================
-        # 🔎 BUSCADOR DE ESPECIES
+        # 🔎 BUSCADOR AVANZADO DE ESPECIES
         # =========================================
         
-        st.subheader("🔎 Análisis detallado por especie")
+        st.subheader("🔎 Análisis avanzado por especie")
         
         especies_disp = [c.replace("ESP_", "") for c in cols_validas]
         
-        esp_sel = st.selectbox(
-            "Selecciona especie",
-            especies_disp
-        )
+        esp_sel = st.selectbox("Selecciona especie", especies_disp)
         
         col_sel = f"ESP_{esp_sel}"
         
-        df_esp = df_base_corr[[col_sel, "Velocidad experimental"]].copy()
+        # dataset base con estado
+        df_esp = df_base_corr.copy()
         
-        # solo donde está presente
+        # filtrar donde aparece
         df_esp = df_esp[df_esp[col_sel] > 0]
         
-        if not df_esp.empty:
-        
-            st.write("Número de veces presente:", len(df_esp))
-        
-            # porcentaje medio
-            pct_mean = df_esp[col_sel].mean()
-            st.write(f"% medio: {pct_mean:.3f}")
-        
-            # distribución
-            st.markdown("### Distribución de %")
-            st.dataframe(df_esp[[col_sel]].describe())
-        
-            # ver casos
-            st.markdown("### Casos individuales")
-            st.dataframe(df_esp)
-        
+        if df_esp.empty:
+            st.info("La especie no aparece en los datos")
         else:
-            st.info("Esa especie no aparece en los datos")
+        
+            # =========================================
+            # 📊 RESUMEN ESTADOS
+            # =========================================
+            st.markdown("### 📊 Estado de los segmentos")
+        
+            resumen_estado = df_esp["estado"].value_counts().reset_index()
+            resumen_estado.columns = ["Estado", "Cantidad"]
+        
+            st.dataframe(resumen_estado)
+        
+            # =========================================
+            # 📦 DETALLE POR SEGMENTO
+            # =========================================
+            st.markdown("### 📦 Detalle por segmento")
+        
+            cols_mostrar = ["Segmento", "estado", col_sel, "Velocidad experimental"]
+        
+            df_detalle = df_esp[cols_mostrar].sort_values(col_sel, ascending=False)
+        
+            st.dataframe(df_detalle)
+        
+            # =========================================
+            # 📈 % EN CADA CESTA
+            # =========================================
+            st.markdown("### 📈 % de la especie en cada caso")
+        
+            st.dataframe(
+                df_esp[[col_sel, "estado"]]
+                .rename(columns={col_sel: "% especie"})
+            )
+            import plotly.express as px
+            
+            # scatter: % especie vs corrosión
+            fig = px.scatter(
+                df_esp,
+                x=col_sel,
+                y="Velocidad experimental",
+                color="estado",
+                title=f"{esp_sel}: % vs corrosión por estado",
+                labels={
+                    col_sel: "% especie",
+                    "Velocidad experimental": "Corrosión"
+                }
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
         st.subheader("🔥 Relación TAN_mix vs corrosión (por tipo de error)")
         
         # asegurar que existe
