@@ -5233,7 +5233,13 @@ with tabs[4]:
         # =========================================
         # 🧪 LEER TAN DESDE EXCEL
         # =========================================
-        df_tan = pd.read_excel("Acidez_GOV_crudos_apto.xlsx")
+        uploaded_tan = st.file_uploader("Sube Excel TAN", type=["xlsx"])
+
+        if uploaded_tan is not None:
+            df_tan = pd.read_excel(uploaded_tan)
+        else:
+            st.warning("Falta Excel TAN")
+            st.stop()
         
         df_tan = df_tan.rename(columns={
             "Codigo": "Crudo",
