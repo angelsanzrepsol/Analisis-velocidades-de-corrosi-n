@@ -5230,6 +5230,21 @@ with tabs[4]:
         # DATASET
         # =========================
         df_model = construir_dataset_modelo_cestas(df_cestas)
+        # =========================================
+        # 🧪 LEER TAN DESDE EXCEL
+        # =========================================
+        df_tan = pd.read_excel("Acidez_GOV_crudos_apto.xlsx")
+        
+        df_tan = df_tan.rename(columns={
+            "Codigo": "Crudo",
+            "Nº Neutralización": "TAN"
+        })
+        
+        df_tan = df_tan[["Crudo", "TAN"]]
+        
+        tan_dict = dict(zip(df_tan["Crudo"], df_tan["TAN"]))
+        
+        st.write("TAN cargado:", tan_dict)
         # VARIABLES
         vars_proceso = st.session_state.get("vars_proceso", [])
         vars_especies = [c for c in df_model.columns if c.startswith("ESP_")]
@@ -5259,18 +5274,18 @@ with tabs[4]:
         # Mapear crudos
         crudos = [c.replace("CRUDO_", "") for c in cols_pct]
         
-        # Crear Ci = % * TAN
+        # Crear Ci = % * TAN (CORRECTO)
         for crudo in crudos:
         
             col_pct = f"CRUDO_{crudo}"
-            col_tan = f"TAN_CRUDO_{crudo}"
         
-            if col_pct in df_model.columns and col_tan in df_model.columns:
+            if col_pct in df_model.columns and crudo in tan_dict:
         
                 df_model[f"Ci_{crudo}"] = (
-                    df_model[col_pct] * df_model[col_tan]
+                    df_model[col_pct] * tan_dict[crudo]
                 )
-        
+        st.write("Columnas Ci:", [c for c in df_model.columns if c.startswith("Ci_")])
+        st.write(df_model[[c for c in df_model.columns if c.startswith("Ci_")]].head())
         # TAN mezcla estimado
         cols_ci = [c for c in df_model.columns if c.startswith("Ci_")]
         
