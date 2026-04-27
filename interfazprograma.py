@@ -5947,6 +5947,17 @@ with tabs[4]:
         # =========================================
         # 🔥 TAN_mix vs corrosión por estado
         # =========================================
+        # total especies por fila
+        cols_esp = [c for c in df_base_corr.columns if c.startswith("ESP_")]
+        
+        df_base_corr["TOTAL_ESP"] = df_base_corr[cols_esp].sum(axis=1)
+        
+        # evitar división por 0
+        df_base_corr["TOTAL_ESP"] = df_base_corr["TOTAL_ESP"].replace(0, np.nan)
+        
+        # convertir a %
+        for col in cols_esp:
+            df_base_corr[col] = df_base_corr[col] / df_base_corr["TOTAL_ESP"]
         # =========================================
         # 🔎 BUSCADOR AVANZADO DE ESPECIES
         # =========================================
