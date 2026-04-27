@@ -5245,13 +5245,31 @@ with tabs[4]:
         ]
     
         vars_modelo = vars_proceso + vars_especies
-    
+        # =========================================
+        # 🧹 LIMPIEZA VARIABLES (CRÍTICO)
+        # =========================================
+        
+        # quitar variables que no existen
+        vars_modelo = [v for v in vars_modelo if v in df_model.columns]
+        
+        # quitar variables sin variación
+        vars_modelo = [v for v in vars_modelo if df_model[v].std() > 0]
+        
+        # quitar NaNs
+        df_model = df_model.dropna(subset=vars_modelo + ["Velocidad experimental"])
+        
+        st.write("Filas finales:", df_model.shape[0])
+        st.write("Variables finales:", len(vars_modelo))
+        
+        if len(df_model) < 5 or len(vars_modelo) == 0:
+            st.warning("No hay suficientes datos válidos para ML")
+            st.stop()
         # =========================
         # MODELOS ML
         # =========================
         res = entrenar_modelos_ml(
-            df_comp,
-            st.session_state.get("vars_proceso", [])
+            df_model,
+            vars_modelo
         )
         if not res or len(res) != 2:
             st.warning("Error en entrenamiento ML")
@@ -5377,7 +5395,7 @@ with tabs[4]:
                         st.error("No se encontró ninguna columna de velocidad válida")
                         st.stop()
                 # entrenar modelo si no existe
-                resultados_ml, y_real = entrenar_modelos_ml(df_cestas, vars_proceso)
+                resultados_ml, y_real = entrenar_modelos_ml(df_model, vars_modelo)
         
                 if not resultados_ml:
                     st.warning("No hay modelo ML disponible")
