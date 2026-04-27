@@ -5230,6 +5230,24 @@ with tabs[4]:
         # DATASET
         # =========================
         df_model = construir_dataset_modelo_cestas(df_cestas)
+        # VARIABLES
+        vars_proceso = st.session_state.get("vars_proceso", [])
+        vars_especies = [c for c in df_model.columns if c.startswith("ESP_")]
+        
+        vars_modelo = vars_proceso + vars_especies
+        
+        # LIMPIEZA
+        vars_modelo = [v for v in vars_modelo if v in df_model.columns]
+        vars_modelo = [v for v in vars_modelo if df_model[v].std() > 0]
+        
+        df_model = df_model.dropna(subset=vars_modelo + ["Velocidad experimental"])
+        
+        st.write("Filas finales:", df_model.shape[0])
+        st.write("Variables finales:", len(vars_modelo))
+        
+        if len(df_model) < 5 or len(vars_modelo) == 0:
+            st.warning("No hay suficientes datos válidos para ML")
+            st.stop()
         # =========================================
         # 🧪 CONSTRUIR VARIABLES TAN POR CRUDO
         # =========================================
