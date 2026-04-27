@@ -5815,7 +5815,7 @@ with tabs[4]:
         
         for col in df_base_corr.columns:
             if col.startswith("ESP_"):
-                if (df_base_corr[col] > 0).sum() >= 3:
+                if (df_base_corr[col] > 0).sum() >= 1:
                     cols_validas.append(col)
         
         st.write("Especies válidas:", cols_validas)
