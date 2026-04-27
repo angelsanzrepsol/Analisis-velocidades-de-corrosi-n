@@ -5411,7 +5411,7 @@ with tabs[4]:
         vars_modelo = [v for v in vars_modelo if df_model[v].std() > 0]
         
         # quitar NaNs
-        df_model = df_model.dropna(subset=vars_modelo + ["Velocidad experimental"])
+        df_model = df_model.fillna(0)
         
         st.write("Filas finales:", df_model.shape[0])
         st.write("Variables finales:", len(vars_modelo))
@@ -5910,7 +5910,7 @@ with tabs[4]:
         
             sub = df_base_corr[[col, "Velocidad experimental"]].dropna()
         
-            if len(sub) < 3:
+            if len(sub) < 2:
                 continue
         
             corr = np.corrcoef(
@@ -5944,11 +5944,7 @@ with tabs[4]:
     
         st.subheader("Correlación directa especies vs corrosión")
     
-        if not df_corr.empty:
-            st.dataframe(df_corr)
-        else:
-            st.info("No hay suficientes datos para correlación")
-
+        
 # -------------------- Footer --------------------
 st.markdown("---")
 if user_module_path is not None:
