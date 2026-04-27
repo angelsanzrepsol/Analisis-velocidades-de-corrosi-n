@@ -1877,13 +1877,11 @@ uploaded_mpa = st.sidebar.file_uploader(
     type=["xlsx"],
     key="file_uploader_mpa"
 )
-uploaded_file = st.file_uploader("Sube Excel de TAN", type=["xlsx"])
-
-if uploaded_file is not None:
-    df_tan = pd.read_excel(uploaded_file)
-else:
-    st.warning("Sube el Excel de TAN")
-    st.stop()
+uploaded_especies = st.sidebar.file_uploader(
+    "Archivo de propiedades de crudos (.xlsx)",
+    type=["xlsx"],
+    key="file_uploader_especies"
+)
 st.sidebar.markdown("---")
 st.sidebar.header("División global de segmentos")
 
