@@ -5572,14 +5572,14 @@ with tabs[4]:
         
                     estados = clasificar_por_tolerancia(y_real, y_pred, tol)
         
-                    df_model = pd.DataFrame({
+                    df_pred = pd.DataFrame({
                         "real": y_real,
                         "pred": y_pred,
                         "estado": estados
                     })
         
                     # unir con cestas
-                    df_cestas_model = df_cestas.copy()
+                    df_cestas_model = df_model.copy()
                     df_cestas_model["Estado_modelo"] = estados
         
                     # ============================================
@@ -5820,7 +5820,7 @@ with tabs[4]:
         # =========================================
         # 🧪 DATASET BASE PARA CORRELACIÓN (SIN FILTRO)
         # =========================================
-        df_base_corr = df_model.copy()
+        df_base_corr = construir_dataset_modelo_cestas(df_cestas)
         
         st.subheader("DEBUG correlación")
         
