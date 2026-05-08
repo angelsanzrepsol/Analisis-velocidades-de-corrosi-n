@@ -399,7 +399,7 @@ def importancia_por_subset(df, vars_proceso, target):
         return pd.DataFrame(
             columns=["Variable", "Importancia"]
         )
-
+    return pd.DataFrame(resultados)
 def importancia_mpa(df):
 
     vars_mpa = []
