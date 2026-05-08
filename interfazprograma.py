@@ -4881,7 +4881,8 @@ with tabs[4]:
             df_comp["Velocidad esperada"],
             tol   # tu tolerancia MPA
         )
-        
+        estado_mpa = pd.Series(estado_mpa).reset_index(drop=True)
+        df_estado = df_estado.reset_index(drop=True)
         df_estado["MPA"] = estado_mpa
         for nombre, data in modelos.items():
         
