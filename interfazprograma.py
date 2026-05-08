@@ -239,7 +239,10 @@ def clasificar_por_tolerancia(y_real, y_pred, tol):
         "pred": y_pred
     })
 
-    df["estado"] = np.nan
+    df["estado"] = pd.Series(
+        [None] * len(df),
+        dtype="object"
+    )
 
     mask = (
         df["real"].notna() &
