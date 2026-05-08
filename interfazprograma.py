@@ -6171,32 +6171,60 @@ with tabs[4]:
                 # =============================================
                 # MÉTRICAS
                 # =============================================
-        
-                r2 = r2_score(y, pred)
-        
+                
                 mae = mean_absolute_error(
                     y,
                     pred
                 )
-        
+                
                 rmse = np.sqrt(
                     mean_squared_error(y, pred)
                 )
-        
+                
+                # =============================================
+                # CLASIFICACIÓN POR TOLERANCIA
+                # =============================================
+                
+                tol_modelo = st.slider(
+                    "Tolerancia modelo personalizado",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.05,
+                    step=0.01,
+                    key=f"tol_{crudo_sel}"
+                )
+                
+                estado_modelo = clasificar_por_tolerancia(
+                    y,
+                    pred,
+                    tol_modelo
+                )
+                
+                conteo_modelo = (
+                    pd.Series(estado_modelo)
+                    .value_counts()
+                    .to_dict()
+                )
+                
                 # =============================================
                 # RESULTADOS
                 # =============================================
-        
+                
                 st.markdown(
                     f"### Modelo con {crudo_sel}"
                 )
-        
-                col1, col2, col3 = st.columns(3)
-        
-                col1.metric("R²", round(r2, 3))
-                col2.metric("MAE", round(mae, 3))
-                col3.metric("RMSE", round(rmse, 3))
-        
+                
+                col1, col2 = st.columns(2)
+                
+                col1.metric(
+                    "MAE",
+                    round(mae, 3)
+                )
+                
+                col2.metric(
+                    "RMSE",
+                    round(rmse, 3)
+                )
                 # =============================================
                 # IMPORTANCIAS
                 # =============================================
@@ -6241,9 +6269,17 @@ with tabs[4]:
         
                 resumen.append({
                     "Modelo": f"ML + {crudo_sel}",
-                    "R2": r2,
                     "MAE": mae,
-                    "RMSE": rmse
+                    "RMSE": rmse,
+                    "ENCIMA": conteo_modelo.get(
+                        "ENCIMA", 0
+                    ),
+                    "DEBAJO": conteo_modelo.get(
+                        "DEBAJO", 0
+                    ),
+                    "DENTRO": conteo_modelo.get(
+                        "DENTRO", 0
+                    )
                 })
         
                 # =============================================
