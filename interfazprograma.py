@@ -1366,17 +1366,9 @@ def cargar_proceso_primera_hoja_limpio(path_excel):
     # Quitar columnas completamente vacías
     df = df.dropna(axis=1, how="all")
 
-    vars_proceso = [
-        c for c in df.columns
-        if c != "Fecha"
-    ]
-    
-    # 🔥 eliminar columnas problemáticas
-    vars_proceso = [
-        v for v in vars_proceso
-        if v in df.columns
-    ]
-    
+    # Variables de proceso (todas menos fecha)
+    vars_proceso = [c for c in df.columns if c != "Fecha"]
+
     return df, vars_proceso
 
 def dividir_segmento_por_intervalo(
@@ -1942,26 +1934,7 @@ def safe_get(fn_name):
 # -------------------- Barra lateral: entradas y estado --------------------
 st.sidebar.header("Entradas y parámetros")
 uploaded_corr = st.sidebar.file_uploader("Archivo de corrosión (.xlsx)", type=None, key="file_uploader_corr")
-uploaded_proc = st.sidebar.file_uploader(
-    "Archivo de proceso (.xlsx) — opcional",
-    type=None,
-    key="file_uploader_proc"
-)
-
-# 🔥 resetear datos si cambia el Excel de proceso
-if uploaded_proc is not None:
-
-    current_name = uploaded_proc.name
-
-    old_name = st.session_state.get(
-        "last_proc_file"
-    )
-
-    if old_name != current_name:
-
-        st.session_state["processed_sheets"] = {}
-
-        st.session_state["last_proc_file"] = current_name
+uploaded_proc = st.sidebar.file_uploader("Archivo de proceso (.xlsx) — opcional", type=None, key="file_uploader_proc")
 
 uploaded_crudos = st.sidebar.file_uploader(
     "Archivo de crudos de petróleo (.xlsx) — opcional",
