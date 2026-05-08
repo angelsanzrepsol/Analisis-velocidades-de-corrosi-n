@@ -6198,7 +6198,7 @@ with tabs[4]:
                     max_value=1.0,
                     value=0.05,
                     step=0.01,
-                    key=f"tol_{crudo_sel}"
+                    key=f"tol_modelo_{crudo_sel}"
                 )
                 estado_modelo = clasificar_por_tolerancia(
                     y_full,
@@ -6236,14 +6236,6 @@ with tabs[4]:
                 # CLASIFICACIÓN POR TOLERANCIA
                 # =============================================
                 
-                tol_modelo = st.slider(
-                    "Tolerancia modelo personalizado",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.05,
-                    step=0.01,
-                    key=f"tol_{crudo_sel}"
-                )
                 
                 estado_modelo = clasificar_por_tolerancia(
                     y_full,
