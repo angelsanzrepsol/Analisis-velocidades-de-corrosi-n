@@ -432,6 +432,13 @@ def importancia_mpa(df):
             "Importancia": abs(corr)
         })
 
+    # 🔥 IMPORTANTE
+    if not resultados:
+
+        return pd.DataFrame(
+            columns=["Variable", "Importancia"]
+        )
+
     return pd.DataFrame(resultados)
 def graficar_especie_vs_corrosion(df_result, especie):
 
