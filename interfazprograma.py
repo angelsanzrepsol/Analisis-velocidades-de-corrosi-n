@@ -1935,7 +1935,6 @@ def safe_get(fn_name):
 st.sidebar.header("Entradas y parámetros")
 uploaded_corr = st.sidebar.file_uploader("Archivo de corrosión (.xlsx)", type=None, key="file_uploader_corr")
 uploaded_proc = st.sidebar.file_uploader("Archivo de proceso (.xlsx) — opcional", type=None, key="file_uploader_proc")
-
 uploaded_crudos = st.sidebar.file_uploader(
     "Archivo de crudos de petróleo (.xlsx) — opcional",
     type=None,
