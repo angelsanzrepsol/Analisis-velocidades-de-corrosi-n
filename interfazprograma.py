@@ -6166,20 +6166,71 @@ with tabs[4]:
         
                 model.fit(X, y)
         
-                pred = model.predict(X)
+                # =============================================
+                # PREDICCIONES SOLO VÁLIDAS
+                # =============================================
+                
+                pred_valid = model.predict(X)
+                
+                # =============================================
+                # RECONSTRUIR TAMAÑO ORIGINAL
+                # =============================================
+                
+                pred_full = pd.Series(
+                    [np.nan] * len(df_model),
+                    index=df_model.index
+                )
+                
+                pred_full.loc[mask] = pred_valid
+                
+                # real completo
+                y_full = pd.to_numeric(
+                    df_model[target],
+                    errors="coerce"
+                )
+                
+                # =============================================
+                # CLASIFICACIÓN COMPLETA
+                # =============================================
+                tol_modelo = st.slider(
+                    "Tolerancia modelo personalizado",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.05,
+                    step=0.01,
+                    key=f"tol_{crudo_sel}"
+                )
+                estado_modelo = clasificar_por_tolerancia(
+                    y_full,
+                    pred_full,
+                    tol_modelo
+                )
+                conteo_modelo = (
+                    pd.Series(estado_modelo)
+                    .value_counts()
+                    .to_dict()
+                )
         
                 # =============================================
                 # MÉTRICAS
                 # =============================================
                 
+                sub_eval = pd.DataFrame({
+                    "real": y_full,
+                    "pred": pred_full
+                }).dropna()
+                
                 mae = mean_absolute_error(
-                    y,
-                    pred
+                    sub_eval["real"],
+                    sub_eval["pred"]
                 )
                 
                 rmse = np.sqrt(
-                    mean_squared_error(y, pred)
-                )
+                    mean_squared_error(
+                        sub_eval["real"],
+                        sub_eval["pred"]
+                    )
+)
                 
                 # =============================================
                 # CLASIFICACIÓN POR TOLERANCIA
@@ -6195,8 +6246,8 @@ with tabs[4]:
                 )
                 
                 estado_modelo = clasificar_por_tolerancia(
-                    y,
-                    pred,
+                    y_full,
+                    pred_full,
                     tol_modelo
                 )
                 
@@ -6246,8 +6297,8 @@ with tabs[4]:
                 # =============================================
         
                 fig = grafica_modelo_vs_real(
-                    y,
-                    pred,
+                    y_full,
+                    pred_full,
                     f"Modelo {crudo_sel}",
                     tolerancia=0.02
                 )
@@ -6320,24 +6371,50 @@ with tabs[4]:
         
                         model_g.fit(Xg, yg)
         
-                        pred_g = model_g.predict(Xg)
-        
+                        pred_g_valid = model_g.predict(Xg)
+
+                        pred_g_full = pd.Series(
+                            [np.nan] * len(df_model),
+                            index=df_model.index
+                        )
+                        
+                        pred_g_full.loc[maskg] = pred_g_valid
+                        
+                        yg_full = pd.to_numeric(
+                            df_model["Velocidad experimental"],
+                            errors="coerce"
+                        )
+                        
+                        estado_g = clasificar_por_tolerancia(
+                            yg_full,
+                            pred_g_full,
+                            tol_modelo
+                        )
+                        
+                        conteo_g = (
+                            pd.Series(estado_g)
+                            .value_counts()
+                            .to_dict()
+                        )
+                        
+                        sub_eval_g = pd.DataFrame({
+                            "real": yg_full,
+                            "pred": pred_g_full
+                        }).dropna()
+                        
                         resumen.append({
                             "Modelo": "ML Global",
-                            "R2": r2_score(
-                                yg,
-                                pred_g
-                            ),
                             "MAE": mean_absolute_error(
-                                yg,
-                                pred_g
+                                sub_eval_g["real"],
+                                sub_eval_g["pred"]
                             ),
+                            
                             "RMSE": np.sqrt(
                                 mean_squared_error(
-                                    yg,
-                                    pred_g
+                                    sub_eval_g["real"],
+                                    sub_eval_g["pred"]
                                 )
-                            )
+                            ),
                         })
         
                 except Exception as e:
