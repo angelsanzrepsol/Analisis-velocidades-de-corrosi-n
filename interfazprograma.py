@@ -237,22 +237,37 @@ def clasificar_por_tolerancia(y_real, y_pred, tol):
     df = pd.DataFrame({
         "real": y_real,
         "pred": y_pred
-    }).dropna()
+    })
 
-    df["delta"] = df["real"] - df["pred"]
+    df["estado"] = np.nan
+
+    mask = (
+        df["real"].notna() &
+        df["pred"].notna()
+    )
+
+    df_valid = df.loc[mask].copy()
+
+    df_valid["delta"] = (
+        df_valid["real"] - df_valid["pred"]
+    )
 
     def clasificar(x):
+
         if x > tol:
             return "ENCIMA"
+
         elif x < -tol:
             return "DEBAJO"
+
         else:
             return "DENTRO"
 
-    df["estado"] = df["delta"].apply(clasificar)
+    df.loc[mask, "estado"] = (
+        df_valid["delta"].apply(clasificar)
+    )
 
     return df["estado"].values
-
 def grafica_modelo_vs_real(y_real, y_pred, titulo, tolerancia):
 
     import plotly.graph_objects as go
