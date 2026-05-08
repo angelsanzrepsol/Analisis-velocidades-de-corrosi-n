@@ -196,41 +196,85 @@ def entrenar_modelos_ml(df, vars_proceso):
 
     resultados = {}
 
-    df = df.copy()
+    df = df.copy().reset_index(drop=True)
 
     # variables válidas
-    vars_validas = [v for v in vars_proceso if v in df.columns]
+    vars_validas = [
+        v for v in vars_proceso
+        if v in df.columns
+    ]
 
     if not vars_validas:
-        return {}
+        return {}, pd.Series(dtype=float)
 
-    X = df[vars_validas].apply(pd.to_numeric, errors="coerce")
-    y = pd.to_numeric(df["Velocidad experimental"], errors="coerce")
-    
-    mask = (~X.isna().any(axis=1)) & (~y.isna())
-    X = X[mask]
-    y = y[mask]
+    # =====================================================
+    # DATOS COMPLETOS
+    # =====================================================
+
+    X_full = df[vars_validas].apply(
+        pd.to_numeric,
+        errors="coerce"
+    )
+
+    y_full = pd.to_numeric(
+        df["Velocidad experimental"],
+        errors="coerce"
+    )
+
+    # =====================================================
+    # FILAS VÁLIDAS
+    # =====================================================
+
+    mask = (
+        ~X_full.isna().any(axis=1)
+    ) & (
+        ~y_full.isna()
+    )
+
+    X = X_full.loc[mask]
+    y = y_full.loc[mask]
 
     if len(X) < 10:
-        return {}
+        return {}, y_full
 
-    # =========================
+    # =====================================================
     # RANDOM FOREST
-    # =========================
+    # =====================================================
+
     try:
-        rf = RandomForestRegressor(n_estimators=300, random_state=42)
+
+        rf = RandomForestRegressor(
+            n_estimators=300,
+            random_state=42
+        )
+
         rf.fit(X, y)
-        pred_rf = rf.predict(X)
+
+        # 🔥 predicción SOLO válidos
+        pred_valid = rf.predict(X)
+
+        # 🔥 reconstruir tamaño ORIGINAL
+        pred_full = pd.Series(
+            [np.nan] * len(df),
+            index=df.index
+        )
+
+        pred_full.loc[mask] = pred_valid
+
         resultados["Random Forest"] = {
             "modelo": rf,
-            "pred": pred_rf,
-            "r2": r2_score(y, pred_rf),
-            "importancias": dict(zip(X.columns, rf.feature_importances_))
+            "pred": pred_full,
+            "r2": r2_score(y, pred_valid),
+            "importancias": dict(
+                zip(X.columns, rf.feature_importances_)
+            )
         }
-    except:
-        pass
 
-    return resultados, y
+    except Exception as e:
+
+        st.error(f"Error ML: {e}")
+
+    return resultados, y_full
 
 def clasificar_por_tolerancia(y_real, y_pred, tol):
 
