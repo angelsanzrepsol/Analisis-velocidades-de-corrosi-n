@@ -5211,13 +5211,32 @@ with tabs[4]:
         
         if not imp_ml_encima.empty or not imp_mpa_encima.empty:
         
-            df_plot = imp_ml_encima.merge(
+            # 🔥 asegurar dataframes válidos
+            if imp_ml_encima is None:
+                imp_ml_encima = pd.DataFrame()
+            
+            if imp_mpa_encima is None:
+                imp_mpa_encima = pd.DataFrame()
+            
+            # 🔥 asegurar columnas
+            if "Variable" not in imp_ml_encima.columns:
+                imp_ml_encima = pd.DataFrame(
+                    columns=["Variable", "Importancia"]
+                )
+            
+            if "Variable" not in imp_mpa_encima.columns:
+                imp_mpa_encima = pd.DataFrame(
+                    columns=["Variable", "Importancia"]
+                )
+            
+            # 🔥 merge seguro
+            df_plot = pd.merge(
+                imp_ml_encima,
                 imp_mpa_encima,
                 on="Variable",
                 how="outer",
                 suffixes=("_ML", "_MPA")
             ).fillna(0)
-        
             fig_sub = go.Figure()
         
             fig_sub.add_trace(go.Bar(
