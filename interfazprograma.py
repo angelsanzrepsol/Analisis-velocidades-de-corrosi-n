@@ -6019,6 +6019,364 @@ with tabs[4]:
             st.dataframe(df_corr.sort_values("Correlacion", key=abs, ascending=False))
         else:
             st.info("No hay suficientes datos para correlación")
+        # =====================================================
+        # MODELO PERSONALIZADO POR CRUDO
+        # =====================================================
+        
+        st.markdown("## Modelo predictivo personalizado por crudo")
+        
+        from sklearn.ensemble import RandomForestRegressor
+        from sklearn.metrics import (
+            r2_score,
+            mean_absolute_error,
+            mean_squared_error
+        )
+        
+        # =====================================================
+        # COMPROBAR DATOS
+        # =====================================================
+        
+        if (
+            "detalle_crudos" in locals() and
+            not detalle_crudos.empty and
+            not df_comp.empty
+        ):
+        
+            # =================================================
+            # LISTA CRUDOS DISPONIBLES
+            # =================================================
+        
+            crudos_disponibles = sorted(
+                detalle_crudos["Especie"]
+                .dropna()
+                .unique()
+            )
+        
+            crudo_sel = st.selectbox(
+                "Seleccionar crudo",
+                crudos_disponibles
+            )
+        
+            # =================================================
+            # CONSTRUIR % DEL CRUDO POR SEGMENTO
+            # =================================================
+        
+            porcentajes = []
+        
+            for _, row in df_comp.iterrows():
+        
+                fi = pd.to_datetime(row["Inicio"])
+                ff = pd.to_datetime(row["Fin"])
+        
+                sub = detalle_crudos[
+                    (detalle_crudos["Fecha"] >= fi) &
+                    (detalle_crudos["Fecha"] <= ff)
+                ]
+        
+                if sub.empty:
+        
+                    porcentajes.append(np.nan)
+                    continue
+        
+                suma = (
+                    sub.groupby("Especie")["Porcentaje"]
+                    .sum()
+                )
+        
+                total = suma.sum()
+        
+                if total == 0:
+        
+                    porcentajes.append(np.nan)
+                    continue
+        
+                pct = (
+                    suma.get(crudo_sel, 0)
+                    / total * 100
+                )
+        
+                porcentajes.append(pct)
+        
+            # =================================================
+            # DATASET MODELO
+            # =================================================
+        
+            df_model = df_comp.copy()
+        
+            nombre_pct = f"% {crudo_sel}"
+        
+            df_model[nombre_pct] = porcentajes
+        
+            # =================================================
+            # VARIABLES MODELO
+            # =================================================
+        
+            posibles = [
+                "TAN",
+                "S",
+                "T",
+                "Caudal",
+                nombre_pct
+            ]
+        
+            vars_modelo = [
+                v for v in posibles
+                if v in df_model.columns
+            ]
+        
+            # =================================================
+            # TARGET
+            # =================================================
+        
+            target = "Velocidad experimental"
+        
+            # =================================================
+            # DATOS LIMPIOS
+            # =================================================
+        
+            X = df_model[vars_modelo].apply(
+                pd.to_numeric,
+                errors="coerce"
+            )
+        
+            y = pd.to_numeric(
+                df_model[target],
+                errors="coerce"
+            )
+        
+            mask = (
+                ~X.isna().any(axis=1)
+            ) & (
+                ~y.isna()
+            )
+        
+            X = X.loc[mask]
+            y = y.loc[mask]
+        
+            # =================================================
+            # ENTRENAR
+            # =================================================
+        
+            if len(X) >= 10:
+        
+                model = RandomForestRegressor(
+                    n_estimators=300,
+                    random_state=42
+                )
+        
+                model.fit(X, y)
+        
+                pred = model.predict(X)
+        
+                # =============================================
+                # MÉTRICAS
+                # =============================================
+        
+                r2 = r2_score(y, pred)
+        
+                mae = mean_absolute_error(
+                    y,
+                    pred
+                )
+        
+                rmse = np.sqrt(
+                    mean_squared_error(y, pred)
+                )
+        
+                # =============================================
+                # RESULTADOS
+                # =============================================
+        
+                st.markdown(
+                    f"### Modelo con {crudo_sel}"
+                )
+        
+                col1, col2, col3 = st.columns(3)
+        
+                col1.metric("R²", round(r2, 3))
+                col2.metric("MAE", round(mae, 3))
+                col3.metric("RMSE", round(rmse, 3))
+        
+                # =============================================
+                # IMPORTANCIAS
+                # =============================================
+        
+                imp = pd.DataFrame({
+                    "Variable": vars_modelo,
+                    "Importancia": model.feature_importances_
+                }).sort_values(
+                    "Importancia",
+                    ascending=False
+                )
+        
+                st.markdown("### Importancia variables")
+        
+                st.dataframe(imp)
+        
+                # =============================================
+                # SCATTER
+                # =============================================
+        
+                fig = grafica_modelo_vs_real(
+                    y,
+                    pred,
+                    f"Modelo {crudo_sel}",
+                    tolerancia=0.02
+                )
+        
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
+        
+                # =============================================
+                # COMPARACIÓN GLOBAL
+                # =============================================
+        
+                st.markdown(
+                    "## Comparación con modelos globales"
+                )
+        
+                resumen = []
+        
+                resumen.append({
+                    "Modelo": f"ML + {crudo_sel}",
+                    "R2": r2,
+                    "MAE": mae,
+                    "RMSE": rmse
+                })
+        
+                # =============================================
+                # GLOBAL ML
+                # =============================================
+        
+                try:
+        
+                    vars_global = [
+                        v for v in vars_proceso
+                        if v in df_model.columns
+                    ]
+        
+                    Xg = df_model[
+                        vars_global
+                    ].apply(
+                        pd.to_numeric,
+                        errors="coerce"
+                    )
+        
+                    yg = y.copy()
+        
+                    maskg = (
+                        ~Xg.isna().any(axis=1)
+                    ) & (
+                        ~yg.isna()
+                    )
+        
+                    Xg = Xg.loc[maskg]
+                    yg = yg.loc[maskg]
+        
+                    if len(Xg) >= 10:
+        
+                        model_g = RandomForestRegressor(
+                            n_estimators=300,
+                            random_state=42
+                        )
+        
+                        model_g.fit(Xg, yg)
+        
+                        pred_g = model_g.predict(Xg)
+        
+                        resumen.append({
+                            "Modelo": "ML Global",
+                            "R2": r2_score(
+                                yg,
+                                pred_g
+                            ),
+                            "MAE": mean_absolute_error(
+                                yg,
+                                pred_g
+                            ),
+                            "RMSE": np.sqrt(
+                                mean_squared_error(
+                                    yg,
+                                    pred_g
+                                )
+                            )
+                        })
+        
+                except Exception as e:
+        
+                    st.warning(
+                        f"Error modelo global: {e}"
+                    )
+        
+                # =============================================
+                # MPA
+                # =============================================
+        
+                try:
+        
+                    if (
+                        "Velocidad esperada"
+                        in df_model.columns
+                    ):
+        
+                        sub_mpa = df_model[
+                            [
+                                "Velocidad experimental",
+                                "Velocidad esperada"
+                            ]
+                        ].dropna()
+        
+                        if not sub_mpa.empty:
+        
+                            yr = sub_mpa[
+                                "Velocidad experimental"
+                            ]
+        
+                            yp = sub_mpa[
+                                "Velocidad esperada"
+                            ]
+        
+                            resumen.append({
+                                "Modelo": "MPA",
+                                "R2": r2_score(
+                                    yr,
+                                    yp
+                                ),
+                                "MAE": mean_absolute_error(
+                                    yr,
+                                    yp
+                                ),
+                                "RMSE": np.sqrt(
+                                    mean_squared_error(
+                                        yr,
+                                        yp
+                                    )
+                                )
+                            })
+        
+                except Exception as e:
+        
+                    st.warning(
+                        f"Error MPA: {e}"
+                    )
+        
+                # =============================================
+                # TABLA FINAL
+                # =============================================
+        
+                df_resumen = pd.DataFrame(
+                    resumen
+                )
+        
+                st.dataframe(df_resumen)
+        
+            else:
+        
+                st.warning(
+                    "No hay suficientes datos válidos"
+                ) 
         # =========================================
         # 🔥 CORRELACIÓN TAN MIX (MUCHO MÁS ROBUSTA)
         # =========================================
