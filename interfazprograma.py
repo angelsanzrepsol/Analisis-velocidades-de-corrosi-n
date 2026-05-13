@@ -6140,7 +6140,30 @@ with tabs[4]:
             nombre_pct = f"% {crudo_sel}"
         
             df_model[nombre_pct] = porcentajes
-        
+            # =============================================
+            # FRECUENCIA DE APARICIÓN DEL CRUDO
+            # =============================================
+            
+            frecuencia_crudo = (
+                df_model[nombre_pct] > 0
+            ).sum()
+            
+            st.write(
+                f"Veces que aparece {crudo_sel}:",
+                frecuencia_crudo
+            )
+            
+            # frecuencia normalizada
+            freq_norm = (
+                frecuencia_crudo / len(df_model)
+            )
+            
+            # nueva variable
+            df_model[f"FREQ_{crudo_sel}"] = (
+                df_model[nombre_pct].apply(
+                    lambda x: freq_norm if x > 0 else 0
+                )
+            )
             # =================================================
             # VARIABLES MODELO
             # =================================================
@@ -6150,7 +6173,8 @@ with tabs[4]:
                 "S",
                 "T",
                 "Caudal",
-                nombre_pct
+                nombre_pct,
+                f"FREQ_{crudo_sel}"
             ]
         
             vars_modelo = [
@@ -6510,7 +6534,21 @@ with tabs[4]:
                 )
         
                 st.dataframe(df_resumen)
-        
+                # =========================================
+                # FRECUENCIA REAL DE CADA CRUDO
+                # =========================================
+                
+                freq_crudos = (
+                    df_model.groupby("Crudo")
+                    .size()
+                    .reset_index(name="Frecuencia_crudo")
+                )
+                
+                df_model= df_model.merge(
+                    freq_crudos,
+                    on="Crudo",
+                    how="left"
+                )
             else:
         
                 st.warning(
