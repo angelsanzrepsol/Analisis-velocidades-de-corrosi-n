@@ -6141,6 +6141,28 @@ with tabs[4]:
         
             df_model[nombre_pct] = porcentajes
             # =============================================
+            # FRECUENCIA DEL CRUDO EN SEGMENTOS
+            # =============================================
+            
+            frecuencia_crudo = (
+                df_model[nombre_pct] > 0
+            ).sum()
+            
+            st.write(
+                f"{crudo_sel} aparece en "
+                f"{frecuencia_crudo} segmentos"
+            )
+            
+            freq_norm = (
+                frecuencia_crudo / len(df_model)
+            )
+            
+            df_model[f"FREQ_{crudo_sel}"] = (
+                df_model[nombre_pct].apply(
+                    lambda x: freq_norm if x > 0 else 0
+                )
+            )
+            # =============================================
             # FRECUENCIA DE APARICIÓN DEL CRUDO
             # =============================================
             
@@ -6538,17 +6560,7 @@ with tabs[4]:
                 # FRECUENCIA REAL DE CADA CRUDO
                 # =========================================
                 
-                freq_crudos = (
-                    df_model.groupby("Crudo")
-                    .size()
-                    .reset_index(name="Frecuencia_crudo")
-                )
                 
-                df_model= df_model.merge(
-                    freq_crudos,
-                    on="Crudo",
-                    how="left"
-                )
             else:
         
                 st.warning(
