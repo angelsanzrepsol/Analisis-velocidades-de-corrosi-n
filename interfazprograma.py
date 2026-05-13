@@ -1143,8 +1143,42 @@ def construir_dataset_crudos_segmentos(detalle_crudos, processed_sheets):
                 filas.append(fila)
 
     if filas:
-        return pd.DataFrame(filas)
-
+    
+        df_final = pd.DataFrame(filas)
+    
+        # =========================================
+        # CONTAR CUÁNTAS VECES APARECE CADA CRUDO
+        # =========================================
+    
+        freq_crudos = (
+            df_final.groupby("Crudo")
+            .size()
+            .reset_index(name="Frecuencia_crudo")
+        )
+    
+        # =========================================
+        # AÑADIR FRECUENCIA AL DATASET
+        # =========================================
+    
+        df_final = df_final.merge(
+            freq_crudos,
+            on="Crudo",
+            how="left"
+        )
+    
+        # =========================================
+        # FRECUENCIA NORMALIZADA
+        # =========================================
+    
+        total_segmentos = df_final["Segmento"].nunique()
+    
+        df_final["Frecuencia_norm"] = (
+            df_final["Frecuencia_crudo"] /
+            total_segmentos
+        )
+    
+        return df_final
+    
     return pd.DataFrame()
 def analizar_crudos_agresividad(df_master):
 
@@ -6509,9 +6543,9 @@ with tabs[4]:
         # convertir a %
         for col in cols_esp:
             df_base_corr[col] = df_base_corr[col] / df_base_corr["TOTAL_ESP"]
-        # =========================================
+        # =======================================
         # 🔎 BUSCADOR AVANZADO DE ESPECIES
-        # =========================================
+        # =======================================
         
         st.subheader("🔎 Análisis avanzado por especie")
         
@@ -6617,7 +6651,6 @@ with tabs[4]:
                 st.write(f"🔴 SUBESTIMA → Correlación TAN_mix: {corr_sub:.3f}")
             else:
                 st.info("🔴 No hay suficientes datos en SUBESTIMA")
-        
         
             # -----------------------------
             # 🔵 SOBREESTIMA
