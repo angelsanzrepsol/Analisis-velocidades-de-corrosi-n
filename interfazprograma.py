@@ -4531,12 +4531,11 @@ with tabs[3]:
     st.subheader("Segmentos dentro del umbral")
     st.dataframe(df_dentro)
     
-    st.subheader("Valores por debajo de la diagonal")
+    st.subheader("Segmentos subestimados")
     st.dataframe(df_encima)
     
-    st.subheader("Valores por encima de la diagonal")
+    st.subheader("Segmento sobreestimados")
     st.dataframe(df_debajo)
-    st.subheader("Relación con variables de proceso")
     # =========================================
     # ANALISIS DE CRUDOS POR ZONA
     # =========================================
@@ -4544,8 +4543,6 @@ with tabs[3]:
     if "df_master_global" in st.session_state:
     
         df_master = st.session_state["df_master_global"]
-    
-        st.subheader("Crudos involucrados en desviaciones del modelo")
     
         seg_encima = df_encima["Segmento"].unique()
         seg_debajo = df_debajo["Segmento"].unique()
