@@ -3078,8 +3078,7 @@ tabs = st.tabs([
     "Combinar hojas",
     "Revisión / Guardado",
     "Tabla corregida",
-    "Modelo predictivo",
-    "Crudos"
+    "Modelo predictivo"
 ])
 
 
