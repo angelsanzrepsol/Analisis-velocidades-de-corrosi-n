@@ -1967,8 +1967,19 @@ def safe_get(fn_name):
 
 # -------------------- Barra lateral: entradas y estado --------------------
 st.sidebar.header("Entradas y parámetros")
-uploaded_corr = st.sidebar.file_uploader("Archivo de corrosión (.xlsx)", type=None, key="file_uploader_corr")
-uploaded_proc = st.sidebar.file_uploader("Archivo de proceso (.xlsx) — opcional", type=None, key="file_uploader_proc")
+uploaded_corrs = st.sidebar.file_uploader(
+    "Archivos de corrosión (.xlsx)",
+    type=["xlsx"],
+    accept_multiple_files=True,
+    key="file_uploader_corrs"
+)
+
+uploaded_procs = st.sidebar.file_uploader(
+    "Archivos de proceso (.xlsx) — opcional",
+    type=["xlsx"],
+    accept_multiple_files=True,
+    key="file_uploader_procs"
+)
 uploaded_crudos = st.sidebar.file_uploader(
     "Archivo de crudos de petróleo (.xlsx) — opcional",
     type=None,
@@ -1984,6 +1995,56 @@ uploaded_especies = st.sidebar.file_uploader(
     type=["xlsx"],
     key="file_uploader_especies"
 )
+# ====================================================
+# REFINERÍAS
+# ====================================================
+
+if "refinerias" not in st.session_state:
+    st.session_state["refinerias"] = {}
+
+for uploaded_corr in uploaded_corrs or []:
+
+    ref_id = make_safe_slug(uploaded_corr.name)
+
+    if ref_id not in st.session_state["refinerias"]:
+        st.session_state["refinerias"][ref_id] = {
+            "nombre": uploaded_corr.name,
+            "archivo_corrosion": uploaded_corr,
+            "archivo_proceso": None,
+            "df_proc": None,
+            "vars_proceso": []
+        }
+    else:
+        st.session_state["refinerias"][ref_id]["archivo_corrosion"] = uploaded_corr
+st.sidebar.markdown("---")
+st.sidebar.header("Asignación proceso → refinería")
+for uploaded_proc in uploaded_procs or []:
+
+    nombres_ref = [
+        x["nombre"]
+        for x in st.session_state["refinerias"].values()
+    ]
+
+    if not nombres_ref:
+        continue
+
+    ref_seleccionada = st.sidebar.selectbox(
+        f"{uploaded_proc.name}",
+        nombres_ref,
+        key=f"proc_{uploaded_proc.name}"
+    )
+
+    ref_id = None
+
+    for rid, data in st.session_state["refinerias"].items():
+
+        if data["nombre"] == ref_seleccionada:
+            ref_id = rid
+            break
+
+    if ref_id:
+
+        st.session_state["refinerias"][ref_id]["archivo_proceso"] = uploaded_proc
 st.sidebar.markdown("---")
 st.sidebar.header("División global de segmentos")
 
@@ -3085,8 +3146,14 @@ tabs = st.tabs([
 # -------------------- Cargar y preparar datos de proceso --------------------
 df_proc = None
 vars_proceso = []
+if not uploaded_procs:
+    st.sidebar.info("Sube un archivo de datos de proceso (.xlsx) para calcular medias.")
+for ref_id, ref_data in st.session_state["refinerias"].items():
 
-if uploaded_proc is not None:
+    uploaded_proc = ref_data.get("archivo_proceso")
+
+    if uploaded_proc is None:
+        continue
     cargar_datos_proceso_fn = safe_get("cargar_datos_proceso")
     try:
         # Guardar archivo subido temporalmente
@@ -3147,454 +3214,476 @@ if uploaded_proc is not None:
 
         vars_proceso = [c for c in df_proc.columns if c != "Fecha"]
 
-        st.session_state["df_proc"] = df_proc
-        st.session_state["vars_proceso"] = vars_proceso
-
+        st.session_state["refinerias"][ref_id]["df_proc"] = df_proc
+        st.session_state["refinerias"][ref_id]["vars_proceso"] = vars_proceso
         st.sidebar.success(f"Archivo de proceso cargado: {len(df_proc)} filas, {len(vars_proceso)} variables.")
 
     except Exception as e:
         st.sidebar.error(f"Error al leer archivo de proceso: {e}")
-else:
-    st.sidebar.info("Sube un archivo de datos de proceso (.xlsx) para calcular medias.")
-
+ 
 # -------------------- TAB 1: Procesar hoja --------------------
 with tabs[0]:
     st.header("Procesamiento de hoja")
 
-    if uploaded_corr is None:
-        st.info("Sube el archivo de corrosión en la barra lateral para comenzar.")
-    else:
-        # ============================================================
+    refinerias = st.session_state.get("refinerias", {})
+
+    if not refinerias:
+        st.info("Sube al menos un archivo de corrosión en la barra lateral.")
+        st.stop()
+
+    ref_nombre = st.selectbox(
+        "Selecciona refinería / Excel de corrosión",
+        options=[v["nombre"] for v in refinerias.values()],
+        key="select_refineria_procesar"
+    )
+
+    ref_id = next(
+        rid for rid, data in refinerias.items()
+        if data["nombre"] == ref_nombre
+    )
+
+    ref_data = st.session_state["refinerias"][ref_id]
+
+    uploaded_corr = ref_data["archivo_corrosion"]
+    df_proc = ref_data.get("df_proc")
+    vars_proceso = ref_data.get("vars_proceso", [])
+
+    st.info(f"Refinería activa: {ref_data['nombre']}")
+    # ============================================================
 # BLOQUE ÚNICO Y CORRECTO PARA LEER EL EXCEL DE CORROSIÓN
 # ============================================================
-        
-        import tempfile
-        
+    
+    import tempfile
+    
+    corr_path = None
+    
+    # Crear archivo temporal con el Excel subido
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+            tmp.write(uploaded_corr.getbuffer())
+            corr_path = tmp.name
+    except Exception as e:
+        st.error(f"No se pudo crear archivo temporal: {e}")
         corr_path = None
-        
-        # Crear archivo temporal con el Excel subido
+
+    # Leer las hojas del archivo
+    hojas = []
+    if uploaded_corr is not None:
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                tmp.write(uploaded_corr.getbuffer())
-                corr_path = tmp.name
-        except Exception as e:
-            st.error(f"No se pudo crear archivo temporal: {e}")
-            corr_path = None
-
-        # Leer las hojas del archivo
-        hojas = []
-        if uploaded_corr is not None:
-            try:
-                hojas_dict = leer_archivo(uploaded_corr)
-                hojas = list(hojas_dict.keys())
-        
-                if not hojas:
-                    st.warning("No se encontraron hojas en el archivo subido.")
-                else:
-                    hoja_sel = st.selectbox("Selecciona hoja", options=hojas, key=f"selectbox_corr_{uploaded_corr.name}")
-                    df_original = hojas_dict[hoja_sel]
-                    st.success(f"Hoja cargada: {hoja_sel} — filas: {len(df_original)}")
-        
-            except Exception as e:
-                st.error(f"No se pudieron leer las hojas del archivo: {e}")
-                hojas = []
-        
-        if df_original is not None and not df_original.empty:
-            st.write("Los parámetros que cambies a continuación recalcularán automáticamente la gráfica y segmentos.")
-            col1, col2 = st.columns([3,1])
-            with col1:
-                st.markdown("**Parámetros activos**")
-                st.write(f"umbral_factor = {umbral_factor}, umbral = {umbral}, min_dias = {min_dias_seg}")
-            with col2:
-                st.markdown("Guardar/Exportar")
-                save_auto = st.checkbox("Salvar automáticamente al guardar procesado", value=False, key="chk_save_auto")
-
-
-            # si tienes archivo de proceso subido, cargarlo (solo sheet 0)
-            if uploaded_proc is not None and st.session_state.get("df_proc") is not None:
-                df_proc = st.session_state.get("df_proc")
-                vars_proceso = st.session_state.get("vars_proceso", [])
-                st.sidebar.success("Archivo de proceso listo para usar.")
+            hojas_dict = leer_archivo(uploaded_corr)
+            hojas = list(hojas_dict.keys())
+    
+            if not hojas:
+                st.warning("No se encontraron hojas en el archivo subido.")
             else:
-                df_proc = None
-                vars_proceso = []
+                hoja_sel = st.selectbox("Selecciona hoja", options=hojas, key=f"selectbox_corr_{uploaded_corr.name}")
+                df_original = hojas_dict[hoja_sel]
+                st.success(f"Hoja cargada: {hoja_sel} — filas: {len(df_original)}")
+    
+        except Exception as e:
+            st.error(f"No se pudieron leer las hojas del archivo: {e}")
+            hojas = []
+    
+    if df_original is not None and not df_original.empty:
+        st.write("Los parámetros que cambies a continuación recalcularán automáticamente la gráfica y segmentos.")
+        col1, col2 = st.columns([3,1])
+        with col1:
+            st.markdown("**Parámetros activos**")
+            st.write(f"umbral_factor = {umbral_factor}, umbral = {umbral}, min_dias = {min_dias_seg}")
+        with col2:
+            st.markdown("Guardar/Exportar")
+            save_auto = st.checkbox("Salvar automáticamente al guardar procesado", value=False, key="chk_save_auto")
 
-            with st.spinner("Procesando y detectando segmentos..."):
-                df_filtrado, y_suave, cambios, segmentos_raw = detectar_segmentos_wrapper(
-                    df_original, umbral_factor, umbral
+
+        # si tienes archivo de proceso subido, cargarlo (solo sheet 0)
+        df_proc = ref_data.get("df_proc")
+        vars_proceso = ref_data.get("vars_proceso", [])
+        
+        if df_proc is not None:
+            st.success("Archivo de proceso asignado a esta refinería listo para usar.")
+        else:
+            st.warning("Esta refinería no tiene archivo de proceso asignado.")
+
+        with st.spinner("Procesando y detectando segmentos..."):
+            df_filtrado, y_suave, cambios, segmentos_raw = detectar_segmentos_wrapper(
+                df_original, umbral_factor, umbral
+            )
+            if df_filtrado is None or y_suave is None:
+                st.error("No se pudieron detectar segmentos. Revisa las columnas (fecha/espesor) o ajusta umbrales.")
+            else:
+                df_proc = ref_data.get("df_proc")
+                vars_proceso = ref_data.get("vars_proceso", [])
+                segmentos_validos, descartados = extraer_segmentos_validos_wrapper(
+                    df_filtrado, y_suave, segmentos_raw, df_proc, vars_proceso, min_dias_seg
                 )
-                if df_filtrado is None or y_suave is None:
-                    st.error("No se pudieron detectar segmentos. Revisa las columnas (fecha/espesor) o ajusta umbrales.")
-                else:
-                    df_proc = st.session_state.get("df_proc", None)
-                    vars_proceso = st.session_state.get("vars_proceso", [])
-                    segmentos_validos, descartados = extraer_segmentos_validos_wrapper(
-                        df_filtrado, y_suave, segmentos_raw, df_proc, vars_proceso, min_dias_seg
-                    )
-                    key = f"proc|{uploaded_corr.name}|{hoja_sel}"
-                    # =========================
-                    # DIVISIÓN GLOBAL
-                    # =========================
-                    
-                    if btn_dividir_global and key in st.session_state["processed_sheets"]:
-                    
-                        data = st.session_state["processed_sheets"][key]
-                    
-                        if tipo_intervalo_global == "Días":
-                            offset = pd.DateOffset(days=valor_intervalo_global)
-                        elif tipo_intervalo_global == "Meses":
-                            offset = pd.DateOffset(months=valor_intervalo_global)
-                        else:
-                            offset = pd.DateOffset(years=valor_intervalo_global)
-                    
-                        nuevos = dividir_todos_segmentos(
-                            data["df_filtrado"],
-                            data["segmentos_validos"],
-                            df_proc,
-                            vars_proceso,
-                            offset,
-                            min_dias=min_dias_seg
-                        )
-                    
-                        nuevos = sorted(nuevos, key=lambda x: x["fecha_ini"])
-                    
-                        # historial
-                        if "historial_segmentos" not in data:
-                            data["historial_segmentos"] = []
-                    
-                        data["historial_segmentos"].append(
-                            data["segmentos_validos"].copy()
-                        )
-                    
-                        st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos
-                        st.session_state["processed_sheets"][key]["manually_modified"] = True
-                    
-                        st.success("División global aplicada")
-                        st.rerun()
-
-                    if key not in st.session_state["processed_sheets"]:
-
-                        st.session_state["processed_sheets"][key] = {
-                            "df_original": df_original,
-                            "df_filtrado": df_filtrado,
-                            "y_suave": y_suave,
-                            "segmentos_validos": segmentos_validos,
-                            "descartados": descartados,
-                            "hoja": hoja_sel,
-                            "source_name": uploaded_corr.name,
-                            "saved": False,
-                            "manually_modified": False
-                        }
+                key = f"proc|{ref_id}|{uploaded_corr.name}|{hoja_sel}"
+                # =========================
+                # DIVISIÓN GLOBAL
+                # =========================
+                
+                if btn_dividir_global and key in st.session_state["processed_sheets"]:
+                
+                    data = st.session_state["processed_sheets"][key]
+                
+                    if tipo_intervalo_global == "Días":
+                        offset = pd.DateOffset(days=valor_intervalo_global)
+                    elif tipo_intervalo_global == "Meses":
+                        offset = pd.DateOffset(months=valor_intervalo_global)
                     else:
-                        existing = st.session_state["processed_sheets"][key]
-                        existing.update({
-                            "df_original": df_original,
-                            "df_filtrado": df_filtrado,
-                            "y_suave": y_suave,
-                            "hoja": hoja_sel,
-                            "source_name": uploaded_corr.name
-                        })
-                        if not existing.get("manually_modified", False):
-                            existing["segmentos_validos"] = segmentos_validos
-                            existing["descartados"] = descartados
-                        st.session_state["processed_sheets"][key] = existing
+                        offset = pd.DateOffset(years=valor_intervalo_global)
+                
+                    nuevos = dividir_todos_segmentos(
+                        data["df_filtrado"],
+                        data["segmentos_validos"],
+                        df_proc,
+                        vars_proceso,
+                        offset,
+                        min_dias=min_dias_seg
+                    )
+                
+                    nuevos = sorted(nuevos, key=lambda x: x["fecha_ini"])
+                
+                    # historial
+                    if "historial_segmentos" not in data:
+                        data["historial_segmentos"] = []
+                
+                    data["historial_segmentos"].append(
+                        data["segmentos_validos"].copy()
+                    )
+                
+                    st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos
+                    st.session_state["processed_sheets"][key]["manually_modified"] = True
+                
+                    st.success("División global aplicada")
+                    st.rerun()
 
-                    try:
-                        stored = st.session_state["processed_sheets"][key]
-                        fig, ax = dibujar_grafica_completa_wrapper(
-                            stored["df_filtrado"], stored["y_suave"],
-                            stored["segmentos_validos"], stored["descartados"], [],
-                            titulo=f"Segmentación — {hoja_sel}", figsize=(fig_w, fig_h), show=False
+                if key not in st.session_state["processed_sheets"]:
+
+                    st.session_state["processed_sheets"][key] = {
+                        "refineria_id": ref_id,
+                        "refineria_nombre": ref_data["nombre"],
+                        "df_original": df_original,
+                        "df_filtrado": df_filtrado,
+                        "y_suave": y_suave,
+                        "segmentos_validos": segmentos_validos,
+                        "descartados": descartados,
+                        "hoja": hoja_sel,
+                        "source_name": uploaded_corr.name,
+                        "saved": False,
+                        "manually_modified": False
+                    }
+                else:
+                    existing = st.session_state["processed_sheets"][key]
+                    existing.update({
+                        "refineria_id": ref_id,
+                        "refineria_nombre": ref_data["nombre"],
+                        "df_original": df_original,
+                        "df_filtrado": df_filtrado,
+                        "y_suave": y_suave,
+                        "hoja": hoja_sel,
+                        "source_name": uploaded_corr.name
+                    })
+                    if not existing.get("manually_modified", False):
+                        existing["segmentos_validos"] = segmentos_validos
+                        existing["descartados"] = descartados
+                    st.session_state["processed_sheets"][key] = existing
+
+                try:
+                    stored = st.session_state["processed_sheets"][key]
+                    fig, ax = dibujar_grafica_completa_wrapper(
+                        stored["df_filtrado"], stored["y_suave"],
+                        stored["segmentos_validos"], stored["descartados"], [],
+                        titulo=f"Segmentación — {hoja_sel}", figsize=(fig_w, fig_h), show=False
+                    )
+
+                    st.pyplot(fig)
+                except Exception as e:
+                    st.error(f"Error dibujando gráfica: {e}")
+
+                st.markdown("### Editar segmentos (eliminar / recalcular)")
+                # ===============================
+                # RECUPERAR SEGMENTOS DESCARTADOS
+                # ===============================
+                
+                desc_list = []
+                descartados = st.session_state["processed_sheets"][key]["descartados"]
+                
+                if descartados:
+                
+                    st.markdown("### Recuperar segmentos descartados")
+                
+                    desc_list = [
+                        f"{i+1}: {d.get('fecha_ini')} → {d.get('fecha_fin')} | Motivo: {d.get('motivo')}"
+                        for i,d in enumerate(descartados)
+                    ]
+                
+                    sel_desc = st.selectbox(
+                        "Selecciona segmento descartado",
+                        options=list(range(1, len(desc_list)+1)),
+                        format_func=lambda x: desc_list[x-1],
+                        key=f"sel_desc_{key}"
+                    )
+                
+                    if st.button("Recuperar segmento descartado", key=f"recuperar_{key}"):
+                
+                        idx0 = sel_desc - 1
+                
+                        if 0 <= idx0 < len(descartados):
+                
+                            seg = st.session_state["processed_sheets"][key]["descartados"].pop(idx0)
+                
+                            seg["estado"] = "valido"
+                            seg["vel_abs"] = abs(seg.get("velocidad", 0))
+                
+                            st.session_state["processed_sheets"][key]["segmentos_validos"].append(seg)
+                
+                            st.session_state["processed_sheets"][key]["segmentos_validos"] = sorted(
+                                st.session_state["processed_sheets"][key]["segmentos_validos"],
+                                key=lambda x: x.get("fecha_ini")
+                            )
+                
+                            st.session_state["processed_sheets"][key]["manually_modified"] = True
+                
+                            st.success("Segmento recuperado")
+                            st.rerun()
+                
+                seg_list = []
+                try:
+                    seg_list = [f"{i+1}: {s.get('fecha_ini')} → {s.get('fecha_fin')}  | Vel: {s.get('vel_abs')}" for i,s in enumerate(st.session_state["processed_sheets"][key]["segmentos_validos"])]
+                except Exception:
+                    seg_list = []
+
+                if seg_list:
+                    sel_idx = st.selectbox("Selecciona segmento", options=list(range(1, len(seg_list)+1)), format_func=lambda x: seg_list[x-1], key=f"selseg_{key}")
+                    # ===============================
+                    # APLICAR SEGMENTACIÓN REFERENCIA
+                    # ===============================
+                    
+                    if "segmentacion_referencia" in st.session_state:
+                    
+                        if st.button("Aplicar segmentación de referencia"):
+                    
+                            ref = st.session_state["segmentacion_referencia"]
+                    
+                            nuevos = aplicar_segmentacion_referencia(
+                                st.session_state["processed_sheets"][key]["df_filtrado"],
+                                ref,
+                                df_proc,
+                                vars_proceso,
+                                segmentos_validos_previos=st.session_state["processed_sheets"][key]["segmentos_validos"],
+                                segmentos_descartados_previos=st.session_state["processed_sheets"][key]["descartados"],
+                                min_dias=min_dias_seg
+                            )
+                            st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos
+                            st.session_state["processed_sheets"][key]["manually_modified"] = True
+                    
+                            st.success("Segmentación de referencia aplicada.")
+                            st.rerun()
+
+                    colA, colB, colC, colD = st.columns(4)
+
+                    with colA:
+                        if st.button("Eliminar segmento (sesión)", key=f"del_{key}"):
+                            idx0 = sel_idx - 1
+                            segmentos = st.session_state["processed_sheets"][key]["segmentos_validos"]
+                            if 0 <= idx0 < len(segmentos):
+                                s = segmentos.pop(idx0)
+                                st.session_state["processed_sheets"][key]["descartados"].append({
+                                    "ini": s.get('ini'),
+                                    "fin": s.get('fin'),
+                                    "motivo": "eliminado_manual",
+                                    "estado": "descartado"
+                                })
+                                st.session_state["processed_sheets"][key]["manually_modified"] = True
+                                st.success("✅ Segmento eliminado de la sesión.")
+                                st.rerun()
+                            else:
+                                st.error("Índice de segmento no válido.")
+
+                    with colB:
+                        st.markdown("**Recalcular segmento local**")
+                        new_umbral_local = st.number_input(
+                            "Nuevo umbral local",
+                            min_value=1e-12,
+                            value=float(umbral),
+                            step=0.0001,
+                            format="%.6f",
+                            key=f"umbral_local_{key}"
+                        )
+                        new_umbral_factor_local = st.number_input(
+                            "Nuevo umbral_factor local",
+                            min_value=1.0,
+                            max_value=2.0,
+                            value=float(umbral_factor),
+                            step=0.0001,
+                            format="%.4f",
+                            key=f"umbral_factor_local_{key}"
                         )
 
-                        st.pyplot(fig)
-                    except Exception as e:
-                        st.error(f"Error dibujando gráfica: {e}")
+                        if st.button("Recalcular segmento", key=f"recalc_{key}"):
+                            idx0 = sel_idx - 1
+                            segmentos = st.session_state["processed_sheets"][key]["segmentos_validos"]
+                            if 0 <= idx0 < len(segmentos):
+                                seg = segmentos[idx0]
+                                try:
+                                    nuevos_validos, nuevos_descartados = recalcular_segmento_local_wrapper(
+                                        st.session_state["processed_sheets"][key]["df_filtrado"],
+                                        st.session_state["processed_sheets"][key]["y_suave"],
+                                        seg, df_proc, vars_proceso, new_umbral_local, new_umbral_factor_local, min_dias=min_dias_seg
+                                    )
+                                    st.session_state["processed_sheets"][key]["manually_modified"] = True
+                                    try:
+                                        st.session_state["processed_sheets"][key]["segmentos_validos"].pop(idx0)
+                                    except Exception:
+                                        pass
+                                    for nd in nuevos_descartados:
+                                        st.session_state["processed_sheets"][key]["descartados"].append(nd)
+                                    for nv in nuevos_validos:
+                                        st.session_state["processed_sheets"][key]["segmentos_validos"].append(nv)
+                                    st.session_state["processed_sheets"][key]["segmentos_validos"] = sorted(
+                                        st.session_state["processed_sheets"][key]["segmentos_validos"],
+                                        key=lambda x: x.get("fecha_ini") or pd.Timestamp.max
+                                    )
+                                    st.success(f"Recalculado: añadidos {len(nuevos_validos)} segmentos (si los hubo). Actualizando vista...")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error recalculando: {e}")
+                            else:
+                                st.error("Índice de segmento no válido.")
 
-                    st.markdown("### Editar segmentos (eliminar / recalcular)")
-                    # ===============================
-                    # RECUPERAR SEGMENTOS DESCARTADOS
-                    # ===============================
+                    with colC:
+                        if st.button("Guardar procesado (pickle + imagen)", key=f"save_{key}"):
+                            data_now = st.session_state["processed_sheets"][key]
+                            out_dir = Path.cwd() / "procesados_finales"
+                            out_dir.mkdir(exist_ok=True)
+                            
+                            import re
+                            
+                            def make_safe_name(text: str) -> str:
+                                text = text.strip()
+                                text = re.sub(r'[\/\\:\*\?"<>\|]+', '', text)  # quita caracteres no válidos
+                                text = text.replace(' ', '_')
+                                return text
+                            
+                            # Nombres seguros
+                            safe_source = make_safe_name(data_now['source_name'])
+                            safe_sheet = make_safe_name(data_now['hoja'])
+                            folder_name = f"{safe_source}_{safe_sheet}"
+                            
+                            # Carpeta específica
+                            out_dir = Path.cwd() / "procesados_finales" / folder_name
+                            out_dir.mkdir(parents=True, exist_ok=True)
+                            
+                            # Rutas finales
+                            pkl_path = out_dir / f"{folder_name}_procesado.pkl"
+                            figpath = out_dir / f"{folder_name}_grafica.png"
+                            
+                            try:
+                                datos_guardar = {
+                                    "df_filtrado": data_now['df_filtrado'],
+                                    "y_suave": data_now['y_suave'],
+                                    "segmentos_validos": data_now['segmentos_validos'],
+                                    "descartados": data_now['descartados'],
+                                    "segmentos_eliminados_idx": []
+                                }
+                                with open(pkl_path, "wb") as f:
+                                    pickle.dump(datos_guardar, f)
+
+                                try:
+                                    fig_save, ax_save = dibujar_grafica_completa_wrapper(
+                                        data_now['df_filtrado'], data_now['y_suave'],
+                                        data_now['segmentos_validos'], data_now['descartados'], [],
+                                        titulo=f"{data_now['hoja']}", figsize=(fig_w, fig_h), show=False
+                                    )
+                                    fig_save.savefig(figpath, dpi=200, bbox_inches="tight")
+                                    plt.close(fig_save)
+                                except Exception:
+                                    pass
+                                st.session_state["processed_sheets"][key]["saved"] = True
+                                st.success(f"Procesado guardado: {pkl_path}. Actualizando vista...")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"No se pudo guardar: {e}")
+                                
+                    with colD:
+                        st.markdown("**Dividir segmento por intervalo**")
                     
-                    desc_list = []
-                    descartados = st.session_state["processed_sheets"][key]["descartados"]
-                    
-                    if descartados:
-                    
-                        st.markdown("### Recuperar segmentos descartados")
-                    
-                        desc_list = [
-                            f"{i+1}: {d.get('fecha_ini')} → {d.get('fecha_fin')} | Motivo: {d.get('motivo')}"
-                            for i,d in enumerate(descartados)
-                        ]
-                    
-                        sel_desc = st.selectbox(
-                            "Selecciona segmento descartado",
-                            options=list(range(1, len(desc_list)+1)),
-                            format_func=lambda x: desc_list[x-1],
-                            key=f"sel_desc_{key}"
+                        tipo_intervalo = st.selectbox(
+                            "Tipo intervalo",
+                            ["Días", "Meses", "Años"],
+                            key=f"tipo_intervalo_{key}"
                         )
                     
-                        if st.button("Recuperar segmento descartado", key=f"recuperar_{key}"):
+                        valor_intervalo = st.number_input(
+                            "Cantidad",
+                            min_value=1,
+                            value=15,
+                            key=f"valor_intervalo_{key}"
+                        )
                     
-                            idx0 = sel_desc - 1
+                        if st.button("Dividir segmento", key=f"dividir_{key}"):
                     
-                            if 0 <= idx0 < len(descartados):
+                            idx0 = sel_idx - 1
+                            segmentos = st.session_state["processed_sheets"][key]["segmentos_validos"]
                     
-                                seg = st.session_state["processed_sheets"][key]["descartados"].pop(idx0)
+                            if 0 <= idx0 < len(segmentos):
                     
-                                seg["estado"] = "valido"
-                                seg["vel_abs"] = abs(seg.get("velocidad", 0))
+                                seg = segmentos[idx0]
                     
-                                st.session_state["processed_sheets"][key]["segmentos_validos"].append(seg)
+                                # Crear offset
+                                if tipo_intervalo == "Días":
+                                    offset = pd.DateOffset(days=valor_intervalo)
+                                elif tipo_intervalo == "Meses":
+                                    offset = pd.DateOffset(months=valor_intervalo)
+                                else:
+                                    offset = pd.DateOffset(years=valor_intervalo)
+                    
+                                nuevos_segmentos = dividir_segmento_por_intervalo(
+                                    st.session_state["processed_sheets"][key]["df_filtrado"],
+                                    seg,
+                                    df_proc,
+                                    vars_proceso,
+                                    offset,
+                                    min_dias=min_dias_seg
+                                )
+                        
+                                # Guardar backup para poder deshacer
+                                if "historial_segmentos" not in st.session_state["processed_sheets"][key]:
+                                    st.session_state["processed_sheets"][key]["historial_segmentos"] = []
+                                
+                                st.session_state["processed_sheets"][key]["historial_segmentos"].append(
+                                    st.session_state["processed_sheets"][key]["segmentos_validos"].copy()
+                                )
+
+                                # eliminar segmento original
+                                segmentos.pop(idx0)
+                    
+                                # añadir nuevos
+                                for n in nuevos_segmentos:
+                                    segmentos.append(n)
                     
                                 st.session_state["processed_sheets"][key]["segmentos_validos"] = sorted(
-                                    st.session_state["processed_sheets"][key]["segmentos_validos"],
+                                    segmentos,
                                     key=lambda x: x.get("fecha_ini")
                                 )
                     
                                 st.session_state["processed_sheets"][key]["manually_modified"] = True
                     
-                                st.success("Segmento recuperado")
+                                st.success("Segmento dividido correctamente")
                                 st.rerun()
-                    
-                    seg_list = []
-                    try:
-                        seg_list = [f"{i+1}: {s.get('fecha_ini')} → {s.get('fecha_fin')}  | Vel: {s.get('vel_abs')}" for i,s in enumerate(st.session_state["processed_sheets"][key]["segmentos_validos"])]
-                    except Exception:
-                        seg_list = []
-
-                    if seg_list:
-                        sel_idx = st.selectbox("Selecciona segmento", options=list(range(1, len(seg_list)+1)), format_func=lambda x: seg_list[x-1], key=f"selseg_{key}")
-                        # ===============================
-                        # APLICAR SEGMENTACIÓN REFERENCIA
-                        # ===============================
+                        # =========================
+                        # BOTÓN DESHACER DIVISIÓN
+                        # =========================
+                        if st.button("↩️ Deshacer última división", key=f"undo_div_{key}"):
                         
-                        if "segmentacion_referencia" in st.session_state:
+                            hist = st.session_state["processed_sheets"][key].get("historial_segmentos", [])
                         
-                            if st.button("Aplicar segmentación de referencia"):
-                        
-                                ref = st.session_state["segmentacion_referencia"]
-                        
-                                nuevos = aplicar_segmentacion_referencia(
-                                    st.session_state["processed_sheets"][key]["df_filtrado"],
-                                    ref,
-                                    df_proc,
-                                    vars_proceso,
-                                    segmentos_validos_previos=st.session_state["processed_sheets"][key]["segmentos_validos"],
-                                    segmentos_descartados_previos=st.session_state["processed_sheets"][key]["descartados"],
-                                    min_dias=min_dias_seg
-                                )
-                                st.session_state["processed_sheets"][key]["segmentos_validos"] = nuevos
-                                st.session_state["processed_sheets"][key]["manually_modified"] = True
-                        
-                                st.success("Segmentación de referencia aplicada.")
+                            if hist:
+                                st.session_state["processed_sheets"][key]["segmentos_validos"] = hist.pop()
+                                st.success("División deshecha")
                                 st.rerun()
-
-                        colA, colB, colC, colD = st.columns(4)
-
-                        with colA:
-                            if st.button("Eliminar segmento (sesión)", key=f"del_{key}"):
-                                idx0 = sel_idx - 1
-                                segmentos = st.session_state["processed_sheets"][key]["segmentos_validos"]
-                                if 0 <= idx0 < len(segmentos):
-                                    s = segmentos.pop(idx0)
-                                    st.session_state["processed_sheets"][key]["descartados"].append({
-                                        "ini": s.get('ini'),
-                                        "fin": s.get('fin'),
-                                        "motivo": "eliminado_manual",
-                                        "estado": "descartado"
-                                    })
-                                    st.session_state["processed_sheets"][key]["manually_modified"] = True
-                                    st.success("✅ Segmento eliminado de la sesión.")
-                                    st.rerun()
-                                else:
-                                    st.error("Índice de segmento no válido.")
-
-                        with colB:
-                            st.markdown("**Recalcular segmento local**")
-                            new_umbral_local = st.number_input(
-                                "Nuevo umbral local",
-                                min_value=1e-12,
-                                value=float(umbral),
-                                step=0.0001,
-                                format="%.6f",
-                                key=f"umbral_local_{key}"
-                            )
-                            new_umbral_factor_local = st.number_input(
-                                "Nuevo umbral_factor local",
-                                min_value=1.0,
-                                max_value=2.0,
-                                value=float(umbral_factor),
-                                step=0.0001,
-                                format="%.4f",
-                                key=f"umbral_factor_local_{key}"
-                            )
-
-                            if st.button("Recalcular segmento", key=f"recalc_{key}"):
-                                idx0 = sel_idx - 1
-                                segmentos = st.session_state["processed_sheets"][key]["segmentos_validos"]
-                                if 0 <= idx0 < len(segmentos):
-                                    seg = segmentos[idx0]
-                                    try:
-                                        nuevos_validos, nuevos_descartados = recalcular_segmento_local_wrapper(
-                                            st.session_state["processed_sheets"][key]["df_filtrado"],
-                                            st.session_state["processed_sheets"][key]["y_suave"],
-                                            seg, df_proc, vars_proceso, new_umbral_local, new_umbral_factor_local, min_dias=min_dias_seg
-                                        )
-                                        st.session_state["processed_sheets"][key]["manually_modified"] = True
-                                        try:
-                                            st.session_state["processed_sheets"][key]["segmentos_validos"].pop(idx0)
-                                        except Exception:
-                                            pass
-                                        for nd in nuevos_descartados:
-                                            st.session_state["processed_sheets"][key]["descartados"].append(nd)
-                                        for nv in nuevos_validos:
-                                            st.session_state["processed_sheets"][key]["segmentos_validos"].append(nv)
-                                        st.session_state["processed_sheets"][key]["segmentos_validos"] = sorted(
-                                            st.session_state["processed_sheets"][key]["segmentos_validos"],
-                                            key=lambda x: x.get("fecha_ini") or pd.Timestamp.max
-                                        )
-                                        st.success(f"Recalculado: añadidos {len(nuevos_validos)} segmentos (si los hubo). Actualizando vista...")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error recalculando: {e}")
-                                else:
-                                    st.error("Índice de segmento no válido.")
-
-                        with colC:
-                            if st.button("Guardar procesado (pickle + imagen)", key=f"save_{key}"):
-                                data_now = st.session_state["processed_sheets"][key]
-                                out_dir = Path.cwd() / "procesados_finales"
-                                out_dir.mkdir(exist_ok=True)
-                                
-                                import re
-                                
-                                def make_safe_name(text: str) -> str:
-                                    text = text.strip()
-                                    text = re.sub(r'[\/\\:\*\?"<>\|]+', '', text)  # quita caracteres no válidos
-                                    text = text.replace(' ', '_')
-                                    return text
-                                
-                                # Nombres seguros
-                                safe_source = make_safe_name(data_now['source_name'])
-                                safe_sheet = make_safe_name(data_now['hoja'])
-                                folder_name = f"{safe_source}_{safe_sheet}"
-                                
-                                # Carpeta específica
-                                out_dir = Path.cwd() / "procesados_finales" / folder_name
-                                out_dir.mkdir(parents=True, exist_ok=True)
-                                
-                                # Rutas finales
-                                pkl_path = out_dir / f"{folder_name}_procesado.pkl"
-                                figpath = out_dir / f"{folder_name}_grafica.png"
-                                
-                                try:
-                                    datos_guardar = {
-                                        "df_filtrado": data_now['df_filtrado'],
-                                        "y_suave": data_now['y_suave'],
-                                        "segmentos_validos": data_now['segmentos_validos'],
-                                        "descartados": data_now['descartados'],
-                                        "segmentos_eliminados_idx": []
-                                    }
-                                    with open(pkl_path, "wb") as f:
-                                        pickle.dump(datos_guardar, f)
-
-                                    try:
-                                        fig_save, ax_save = dibujar_grafica_completa_wrapper(
-                                            data_now['df_filtrado'], data_now['y_suave'],
-                                            data_now['segmentos_validos'], data_now['descartados'], [],
-                                            titulo=f"{data_now['hoja']}", figsize=(fig_w, fig_h), show=False
-                                        )
-                                        fig_save.savefig(figpath, dpi=200, bbox_inches="tight")
-                                        plt.close(fig_save)
-                                    except Exception:
-                                        pass
-                                    st.session_state["processed_sheets"][key]["saved"] = True
-                                    st.success(f"Procesado guardado: {pkl_path}. Actualizando vista...")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"No se pudo guardar: {e}")
-                                    
-                        with colD:
-                            st.markdown("**Dividir segmento por intervalo**")
-                        
-                            tipo_intervalo = st.selectbox(
-                                "Tipo intervalo",
-                                ["Días", "Meses", "Años"],
-                                key=f"tipo_intervalo_{key}"
-                            )
-                        
-                            valor_intervalo = st.number_input(
-                                "Cantidad",
-                                min_value=1,
-                                value=15,
-                                key=f"valor_intervalo_{key}"
-                            )
-                        
-                            if st.button("Dividir segmento", key=f"dividir_{key}"):
-                        
-                                idx0 = sel_idx - 1
-                                segmentos = st.session_state["processed_sheets"][key]["segmentos_validos"]
-                        
-                                if 0 <= idx0 < len(segmentos):
-                        
-                                    seg = segmentos[idx0]
-                        
-                                    # Crear offset
-                                    if tipo_intervalo == "Días":
-                                        offset = pd.DateOffset(days=valor_intervalo)
-                                    elif tipo_intervalo == "Meses":
-                                        offset = pd.DateOffset(months=valor_intervalo)
-                                    else:
-                                        offset = pd.DateOffset(years=valor_intervalo)
-                        
-                                    nuevos_segmentos = dividir_segmento_por_intervalo(
-                                        st.session_state["processed_sheets"][key]["df_filtrado"],
-                                        seg,
-                                        df_proc,
-                                        vars_proceso,
-                                        offset,
-                                        min_dias=min_dias_seg
-                                    )
-                            
-                                    # Guardar backup para poder deshacer
-                                    if "historial_segmentos" not in st.session_state["processed_sheets"][key]:
-                                        st.session_state["processed_sheets"][key]["historial_segmentos"] = []
-                                    
-                                    st.session_state["processed_sheets"][key]["historial_segmentos"].append(
-                                        st.session_state["processed_sheets"][key]["segmentos_validos"].copy()
-                                    )
-
-                                    # eliminar segmento original
-                                    segmentos.pop(idx0)
-                        
-                                    # añadir nuevos
-                                    for n in nuevos_segmentos:
-                                        segmentos.append(n)
-                        
-                                    st.session_state["processed_sheets"][key]["segmentos_validos"] = sorted(
-                                        segmentos,
-                                        key=lambda x: x.get("fecha_ini")
-                                    )
-                        
-                                    st.session_state["processed_sheets"][key]["manually_modified"] = True
-                        
-                                    st.success("Segmento dividido correctamente")
-                                    st.rerun()
-                            # =========================
-                            # BOTÓN DESHACER DIVISIÓN
-                            # =========================
-                            if st.button("↩️ Deshacer última división", key=f"undo_div_{key}"):
-                            
-                                hist = st.session_state["processed_sheets"][key].get("historial_segmentos", [])
-                            
-                                if hist:
-                                    st.session_state["processed_sheets"][key]["segmentos_validos"] = hist.pop()
-                                    st.success("División deshecha")
-                                    st.rerun()
-                                else:
-                                    st.warning("No hay historial para deshacer")
+                            else:
+                                st.warning("No hay historial para deshacer")
 
 
 # -------------------- TAB 2: Combinar hojas --------------------
@@ -4745,8 +4834,6 @@ with tabs[4]:
         # =========================
     
         st.subheader("Modelo de datos (Machine Learning)")
-        st.subheader("DEBUG ML")
-        
         vars_modelo = st.session_state.get("vars_proceso", [])
         
         res = entrenar_modelos_ml(
@@ -5063,7 +5150,7 @@ with tabs[4]:
         # =========================
         # 🔴 SUBESTIMADOS
         # =========================
-        st.subheader("🔴 Variables en segmentos SUBESTIMADOS")
+        st.subheader("Variables en segmentos SUBESTIMADOS")
         
         if not imp_ml_encima.empty or not imp_mpa_encima.empty:
         
@@ -5121,7 +5208,7 @@ with tabs[4]:
         # =========================
         # 🔵 SOBREESTIMADOS
         # =========================
-        st.subheader("🔵 Variables en segmentos SOBREESTIMADOS")
+        st.subheader("Variables en segmentos SOBREESTIMADOS")
         
         if not imp_ml_debajo.empty or not imp_mpa_debajo.empty:
         
