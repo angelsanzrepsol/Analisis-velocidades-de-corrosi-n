@@ -1331,77 +1331,199 @@ def resumen_top_variables(df_imp, top_n=3):
     )
 def cargar_proceso_primera_hoja_limpio(path_excel):
 
-    # Leer primera hoja completa
-    df_raw = pd.read_excel(path_excel, sheet_name=0, header=None)
-    
-    # 🔧 LIMPIEZA BRUTAL PARA EVITAR ERRORES DEL EXCELç
-    # 🔧 Limpieza total antes de cualquier operación
-    def limpiar_celda(x):
-        if isinstance(x, (int, float, str)) or pd.isna(x):
-            return x
-        return np.nan  # listas/arrays/objetos → NaN
-
-    df_raw = df_raw.applymap(limpiar_celda)
+    df_raw = pd.read_excel(
+        path_excel,
+        sheet_name=0,
+        header=None
+    )
 
     df_raw = df_raw.replace(
         ["nan", "NaN", "None", "<NA>", "N/A", "NA", "", " "],
         np.nan
     )
 
+    # =====================================================
+    # 1. Detectar columna de fecha y primera fila real
+    # =====================================================
 
-    # Buscar la primera fila que contenga al menos un número (datos reales)
-    # Buscar fila donde aparezca columna tipo Fecha / Time / Timestamp
-    fila_inicio = None
-    
-    for i in range(len(df_raw)):
-        fila = df_raw.iloc[i].astype(str).str.lower()
-    
-        if any(
-            any(k in celda for k in ["fecha", "time", "timestamp", "date"])
-            for celda in fila
-        ):
-            fila_inicio = i
-            break
-    
-    if fila_inicio is None:
-        fila_inicio = 0
+    mejor = None
 
+    for c in df_raw.columns:
 
-    if fila_inicio is None:
-        raise ValueError("No se encontraron filas con datos numéricos en el archivo de proceso.")
+        fechas = pd.to_datetime(
+            df_raw[c],
+            errors="coerce"
+        )
 
-    # Usamos esa fila como cabecera
-    df_raw.columns = [str(c).strip() for c in df_raw.iloc[fila_inicio]]
-    df = df_raw.iloc[fila_inicio+1:].reset_index(drop=True)
+        idx_validos = np.where(fechas.notna())[0]
 
-    # Reemplazar columnas vacías por nombres seguros
-    df.columns = [f"Var_{i}" if c == "" or c.lower().startswith("unnamed") else c for i,c in enumerate(df.columns)]
+        if len(idx_validos) < 3:
+            continue
 
-    # Crear columna fecha artificial si no existe
-    if "Fecha" not in df.columns:
-        df["Fecha"] = pd.date_range(start="2000-01-01", periods=len(df), freq="D")
-        df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
-        df = df.dropna(subset=["Fecha"])
+        fila_inicio = None
 
+        for i in idx_validos:
 
-    # Convertir todo lo posible a numérico
+            # buscamos 3 fechas seguidas: ahí empiezan los datos reales
+            if i + 2 < len(fechas) and fechas.iloc[i:i+3].notna().all():
+                fila_inicio = i
+                break
+
+        if fila_inicio is None:
+            continue
+
+        score = fechas.notna().sum()
+
+        if mejor is None or score > mejor[0]:
+            mejor = (score, c, fila_inicio)
+
+    if mejor is None:
+        raise ValueError("No se pudo detectar una columna de fechas válida en el Excel de proceso.")
+
+    _, col_fecha, fila_inicio = mejor
+
+    # =====================================================
+    # 2. Construir nombres de columnas usando filas superiores
+    # =====================================================
+
+    filas_cabecera = [1, 2, 3, 0]
+    columnas = []
+
+    for c in df_raw.columns:
+
+        if c == col_fecha:
+            columnas.append("Fecha")
+            continue
+
+        partes = []
+
+        for r in filas_cabecera:
+
+            if r >= len(df_raw):
+                continue
+
+            val = df_raw.iat[r, c]
+
+            if pd.isna(val):
+                continue
+
+            texto = str(val).strip()
+
+            if texto == "":
+                continue
+
+            # evitar meter fechas como nombres de columna
+            es_fecha = pd.to_datetime(
+                pd.Series([texto]),
+                errors="coerce"
+            ).notna().iloc[0]
+
+            if es_fecha:
+                continue
+
+            partes.append(texto)
+
+        if partes:
+            nombre = " | ".join(dict.fromkeys(partes))
+        else:
+            nombre = f"Var_{c}"
+
+        columnas.append(nombre)
+
+    # evitar nombres duplicados
+    columnas_unicas = []
+    vistos = {}
+
+    for col in columnas:
+
+        if col in vistos:
+            vistos[col] += 1
+            columnas_unicas.append(f"{col}_{vistos[col]}")
+        else:
+            vistos[col] = 0
+            columnas_unicas.append(col)
+
+    # =====================================================
+    # 3. Crear dataframe desde la fila real de datos
+    # =====================================================
+
+    df = df_raw.iloc[fila_inicio:].copy().reset_index(drop=True)
+    df.columns = columnas_unicas
+
+    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+    df = df.dropna(subset=["Fecha"])
+    df = df.sort_values("Fecha").reset_index(drop=True)
+
+    # =====================================================
+    # 4. Convertir variables a numérico
+    # =====================================================
+
     for c in df.columns:
-        if c != "Fecha":
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-            df[c] = (
-                df[c]
-                .astype(str)
-                .str.replace(",", ".")
-            )
-            
-            df[c] = pd.to_numeric(df[c], errors="coerce")
 
+        if c == "Fecha":
+            continue
 
-    # Quitar columnas completamente vacías
+        df[c] = (
+            df[c]
+            .astype(str)
+            .str.replace(",", ".", regex=False)
+        )
+
+        df[c] = pd.to_numeric(
+            df[c],
+            errors="coerce"
+        )
+
     df = df.dropna(axis=1, how="all")
 
-    # Variables de proceso (todas menos fecha)
-    vars_proceso = [c for c in df.columns if c != "Fecha"]
+    # =====================================================
+    # 5. Crear alias útiles: T, TAN, S
+    # =====================================================
+
+    if "TAN" not in df.columns:
+
+        cols_tan = [
+            c for c in df.columns
+            if "tan" in c.lower() or "acidez" in c.lower()
+        ]
+
+        if cols_tan:
+            df["TAN"] = df[cols_tan[0]]
+
+    if "S" not in df.columns:
+
+        cols_s = [
+            c for c in df.columns
+            if "azufre" in c.lower() or "s gopv" in c.lower()
+        ]
+
+        if cols_s:
+            df["S"] = df[cols_s[0]]
+
+    if "T" not in df.columns:
+
+        cols_t = [
+            c for c in df.columns
+            if any(k in c.lower() for k in [
+                "temperatura",
+                "salida",
+                "entrada"
+            ])
+        ]
+
+        if cols_t:
+            cols_t = sorted(
+                cols_t,
+                key=lambda x: df[x].notna().sum(),
+                reverse=True
+            )
+
+            df["T"] = df[cols_t[0]]
+
+    vars_proceso = [
+        c for c in df.columns
+        if c != "Fecha"
+    ]
 
     return df, vars_proceso
 
