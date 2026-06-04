@@ -1343,50 +1343,40 @@ def cargar_proceso_primera_hoja_limpio(path_excel):
     )
 
     # =====================================================
-    # 1. Detectar columna de fecha y primera fila real
+    # Detectar columna fecha real
     # =====================================================
 
-    mejor = None
+    col_fecha = None
+    fila_inicio = None
 
     for c in df_raw.columns:
 
+        serie = df_raw.iloc[:, c]
+
         fechas = pd.to_datetime(
-            df_raw[c],
+            serie,
             errors="coerce"
         )
 
-        idx_validos = np.where(fechas.notna())[0]
+        validas = fechas.notna()
 
-        if len(idx_validos) < 3:
-            continue
+        for i in range(len(fechas) - 3):
 
-        fila_inicio = None
-
-        for i in idx_validos:
-
-            # buscamos 3 fechas seguidas: ahí empiezan los datos reales
-            if i + 2 < len(fechas) and fechas.iloc[i:i+3].notna().all():
+            if validas.iloc[i:i+3].all():
+                col_fecha = c
                 fila_inicio = i
                 break
 
-        if fila_inicio is None:
-            continue
+        if col_fecha is not None:
+            break
 
-        score = fechas.notna().sum()
-
-        if mejor is None or score > mejor[0]:
-            mejor = (score, c, fila_inicio)
-
-    if mejor is None:
-        raise ValueError("No se pudo detectar una columna de fechas válida en el Excel de proceso.")
-
-    _, col_fecha, fila_inicio = mejor
+    if col_fecha is None:
+        raise ValueError("No se pudo detectar columna de fechas en el archivo de proceso.")
 
     # =====================================================
-    # 2. Construir nombres de columnas usando filas superiores
+    # Crear nombres de columnas desde las filas superiores
     # =====================================================
 
-    filas_cabecera = [1, 2, 3, 0]
     columnas = []
 
     for c in df_raw.columns:
@@ -1397,10 +1387,7 @@ def cargar_proceso_primera_hoja_limpio(path_excel):
 
         partes = []
 
-        for r in filas_cabecera:
-
-            if r >= len(df_raw):
-                continue
+        for r in [1, 2, 3, 0]:
 
             val = df_raw.iat[r, c]
 
@@ -1412,13 +1399,8 @@ def cargar_proceso_primera_hoja_limpio(path_excel):
             if texto == "":
                 continue
 
-            # evitar meter fechas como nombres de columna
-            es_fecha = pd.to_datetime(
-                pd.Series([texto]),
-                errors="coerce"
-            ).notna().iloc[0]
-
-            if es_fecha:
+            # evitar nombres basura
+            if texto.lower() in ["media", "desviacion", "max", "min"]:
                 continue
 
             partes.append(texto)
@@ -1430,32 +1412,32 @@ def cargar_proceso_primera_hoja_limpio(path_excel):
 
         columnas.append(nombre)
 
-    # evitar nombres duplicados
-    columnas_unicas = []
-    vistos = {}
+    # nombres únicos
+    columnas_finales = []
+    usados = {}
 
     for col in columnas:
 
-        if col in vistos:
-            vistos[col] += 1
-            columnas_unicas.append(f"{col}_{vistos[col]}")
+        if col not in usados:
+            usados[col] = 0
+            columnas_finales.append(col)
         else:
-            vistos[col] = 0
-            columnas_unicas.append(col)
+            usados[col] += 1
+            columnas_finales.append(f"{col}_{usados[col]}")
 
     # =====================================================
-    # 3. Crear dataframe desde la fila real de datos
+    # Crear dataframe real
     # =====================================================
 
     df = df_raw.iloc[fila_inicio:].copy().reset_index(drop=True)
-    df.columns = columnas_unicas
+    df.columns = columnas_finales
 
     df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
     df = df.dropna(subset=["Fecha"])
     df = df.sort_values("Fecha").reset_index(drop=True)
 
     # =====================================================
-    # 4. Convertir variables a numérico
+    # Convertir columnas numéricas
     # =====================================================
 
     for c in df.columns:
@@ -1467,58 +1449,43 @@ def cargar_proceso_primera_hoja_limpio(path_excel):
             df[c]
             .astype(str)
             .str.replace(",", ".", regex=False)
+            .str.replace("[", "", regex=False)
+            .str.replace("]", "", regex=False)
         )
 
-        df[c] = pd.to_numeric(
-            df[c],
-            errors="coerce"
-        )
+        df[c] = pd.to_numeric(df[c], errors="coerce")
 
     df = df.dropna(axis=1, how="all")
 
     # =====================================================
-    # 5. Crear alias útiles: T, TAN, S
+    # Alias importantes para tu código
     # =====================================================
 
-    if "TAN" not in df.columns:
+    cols_tan = [
+        c for c in df.columns
+        if "tan" in c.lower() or "acidez" in c.lower()
+    ]
 
-        cols_tan = [
-            c for c in df.columns
-            if "tan" in c.lower() or "acidez" in c.lower()
-        ]
+    if cols_tan and "TAN" not in df.columns:
+        df["TAN"] = df[cols_tan[0]]
 
-        if cols_tan:
-            df["TAN"] = df[cols_tan[0]]
+    cols_s = [
+        c for c in df.columns
+        if "azufre" in c.lower() or "s gopv" in c.lower()
+    ]
 
-    if "S" not in df.columns:
+    if cols_s and "S" not in df.columns:
+        df["S"] = df[cols_s[0]]
 
-        cols_s = [
-            c for c in df.columns
-            if "azufre" in c.lower() or "s gopv" in c.lower()
-        ]
+    cols_temp = [
+        c for c in df.columns
+        if "temperatura" in c.lower()
+        or "t salida" in c.lower()
+        or "entrada" in c.lower()
+    ]
 
-        if cols_s:
-            df["S"] = df[cols_s[0]]
-
-    if "T" not in df.columns:
-
-        cols_t = [
-            c for c in df.columns
-            if any(k in c.lower() for k in [
-                "temperatura",
-                "salida",
-                "entrada"
-            ])
-        ]
-
-        if cols_t:
-            cols_t = sorted(
-                cols_t,
-                key=lambda x: df[x].notna().sum(),
-                reverse=True
-            )
-
-            df["T"] = df[cols_t[0]]
+    if cols_temp and "T" not in df.columns:
+        df["T"] = df[cols_temp[0]]
 
     vars_proceso = [
         c for c in df.columns
@@ -3276,7 +3243,7 @@ for ref_id, ref_data in st.session_state["refinerias"].items():
 
     if uploaded_proc is None:
         continue
-    cargar_datos_proceso_fn = safe_get("cargar_datos_proceso")
+    cargar_datos_proceso_fn = None
     try:
         # Guardar archivo subido temporalmente
         if hasattr(uploaded_proc, "name"):
