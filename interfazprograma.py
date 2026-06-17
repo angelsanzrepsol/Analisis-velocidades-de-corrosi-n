@@ -2939,7 +2939,10 @@ def dibujar_grafica_completa_fallback(df_filtrado, y_suave, segmentos_validos, d
         except Exception:
             continue
     validos = [s for s in segmentos_validos if s.get("estado","valido") == "valido"]
-    colormap = plt.cm.get_cmap("turbo", max(2, len(validos)))
+    try:
+        colormap = plt.get_cmap("turbo", max(2, len(validos)))
+    except Exception:
+        colormap = plt.get_cmap("viridis", max(2, len(validos)))
     contador = 0
     for s in sorted(segmentos_validos, key=lambda x: x.get("fecha_ini") or pd.Timestamp.max):
         if s.get("estado","valido") != "valido": continue
