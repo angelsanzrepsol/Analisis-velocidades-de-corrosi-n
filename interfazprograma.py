@@ -1097,6 +1097,18 @@ def procesar_crudos(df):
 
     return detalle
 
+def cargar_detalle_crudos(uploaded_crudo):
+
+    hojas = leer_archivo(uploaded_crudo)
+
+    if not hojas:
+        return pd.DataFrame()
+
+    hoja = list(hojas.keys())[0]
+    df_crudos = hojas[hoja]
+
+    return procesar_crudos(df_crudos)
+
 def añadir_proceso_a_dias_crudo(df_dias_crudo, df_proc):
 
     if df_proc is None or df_proc.empty:
@@ -2160,8 +2172,9 @@ uploaded_procs = st.sidebar.file_uploader(
     key="file_uploader_procs"
 )
 uploaded_crudos = st.sidebar.file_uploader(
-    "Archivo de crudos de petróleo (.xlsx) — opcional",
-    type=None,
+    "Archivos de crudos de petróleo (.xlsx) — opcional",
+    type=["xlsx"],
+    accept_multiple_files=True,
     key="file_uploader_crudos"
 )
 uploaded_mpa = st.sidebar.file_uploader(
@@ -2190,11 +2203,16 @@ for uploaded_corr in uploaded_corrs or []:
             "nombre": uploaded_corr.name,
             "archivo_corrosion": uploaded_corr,
             "archivo_proceso": None,
+            "archivo_crudos": None,
+            "detalle_crudos": None,
             "df_proc": None,
             "vars_proceso": []
         }
     else:
         st.session_state["refinerias"][ref_id]["archivo_corrosion"] = uploaded_corr
+
+    st.session_state["refinerias"][ref_id].setdefault("archivo_crudos", None)
+    st.session_state["refinerias"][ref_id].setdefault("detalle_crudos", None)
 st.sidebar.markdown("---")
 st.sidebar.header("Asignación proceso → refinería")
 for uploaded_proc in uploaded_procs or []:
@@ -2224,6 +2242,39 @@ for uploaded_proc in uploaded_procs or []:
     if ref_id:
 
         st.session_state["refinerias"][ref_id]["archivo_proceso"] = uploaded_proc
+
+for data in st.session_state["refinerias"].values():
+    data["archivo_crudos"] = None
+
+st.sidebar.markdown("---")
+st.sidebar.header("Asignacion crudos -> refineria")
+for uploaded_crudo in uploaded_crudos or []:
+
+    nombres_ref = [
+        x["nombre"]
+        for x in st.session_state["refinerias"].values()
+    ]
+
+    if not nombres_ref:
+        continue
+
+    ref_seleccionada = st.sidebar.selectbox(
+        f"{uploaded_crudo.name}",
+        nombres_ref,
+        key=f"crudo_{uploaded_crudo.name}"
+    )
+
+    ref_id = None
+
+    for rid, data in st.session_state["refinerias"].items():
+
+        if data["nombre"] == ref_seleccionada:
+            ref_id = rid
+            break
+
+    if ref_id:
+
+        st.session_state["refinerias"][ref_id]["archivo_crudos"] = uploaded_crudo
 st.sidebar.markdown("---")
 st.sidebar.header("División global de segmentos")
 
@@ -3284,35 +3335,64 @@ if "processed_sheets" not in st.session_state:
 # CREAR DATASET GLOBAL DE CRUDOS
 # =========================================
 
-if uploaded_crudos is not None:
+st.session_state.pop("detalle_crudos_global", None)
+st.session_state.pop("df_master_global", None)
+
+detalle_crudos_global = []
+df_master_global = []
+
+for ref_id, ref_data in st.session_state.get("refinerias", {}).items():
+
+    uploaded_crudo = ref_data.get("archivo_crudos")
+
+    if uploaded_crudo is None:
+        st.session_state["refinerias"][ref_id]["detalle_crudos"] = None
+        continue
 
     try:
 
-        hojas_crudos = leer_archivo(uploaded_crudos)
+        detalle_crudos = cargar_detalle_crudos(uploaded_crudo)
 
-        if hojas_crudos:
+        if detalle_crudos.empty:
+            st.session_state["refinerias"][ref_id]["detalle_crudos"] = None
+            continue
 
-            hoja_crudos = list(hojas_crudos.keys())[0]
+        detalle_crudos = detalle_crudos.copy()
+        detalle_crudos["Refineria"] = ref_data["nombre"]
+        st.session_state["refinerias"][ref_id]["detalle_crudos"] = detalle_crudos
+        detalle_crudos_global.append(detalle_crudos)
 
-            df_crudos = hojas_crudos[hoja_crudos]
+        processed_ref = {
+            k: v
+            for k, v in st.session_state.get("processed_sheets", {}).items()
+            if k.startswith(f"proc|{ref_id}|")
+        }
 
-            detalle_crudos = procesar_crudos(df_crudos)
-            st.session_state["detalle_crudos_global"] = detalle_crudos
+        df_master = construir_dataset_crudos_segmentos(
+            detalle_crudos,
+            processed_ref
+        )
 
-            df_master = construir_dataset_crudos_segmentos(
-                detalle_crudos,
-                st.session_state.get("processed_sheets", {})
-            )
-
-            if not df_master.empty:
-
-                df_master["Segmento"] = "Seg " + df_master["Segmento"].astype(str)
-
-                st.session_state["df_master_global"] = df_master
+        if not df_master.empty:
+            df_master["Segmento"] = "Seg " + df_master["Segmento"].astype(str)
+            df_master["Refineria"] = ref_data["nombre"]
+            df_master_global.append(df_master)
 
     except Exception as e:
 
-        st.warning(f"No se pudo generar dataset de crudos: {e}")
+        st.warning(f"No se pudo generar dataset de crudos para {ref_data['nombre']}: {e}")
+
+if detalle_crudos_global:
+    st.session_state["detalle_crudos_global"] = pd.concat(
+        detalle_crudos_global,
+        ignore_index=True
+    )
+
+if df_master_global:
+    st.session_state["df_master_global"] = pd.concat(
+        df_master_global,
+        ignore_index=True
+    )
 # -------------------- Pestañas UI --------------------
 tabs = st.tabs([
     "Procesar hoja",
@@ -4549,6 +4629,28 @@ with tabs[3]:
         k: v for k, v in processed.items()
         if k in sondas_seleccionadas and v.get("saved")
     }
+
+    ref_ids_seleccionados = sorted({
+        k.split("|")[1]
+        for k in processed_filtrado.keys()
+        if k.startswith("proc|") and len(k.split("|")) > 2
+    })
+
+    ref_id_crudos_activo = (
+        ref_ids_seleccionados[0]
+        if len(ref_ids_seleccionados) == 1
+        else None
+    )
+
+    detalle_crudos_ref = None
+
+    if ref_id_crudos_activo is not None:
+        detalle_crudos_ref = (
+            st.session_state
+            .get("refinerias", {})
+            .get(ref_id_crudos_activo, {})
+            .get("detalle_crudos")
+        )
     umbral_diag = st.slider(
         "Tolerancia respecto a la diagonal (mm/año)",
         min_value=0.0,
@@ -4729,6 +4831,10 @@ with tabs[3]:
     if "df_master_global" in st.session_state:
     
         df_master = st.session_state["df_master_global"]
+
+        if ref_id_crudos_activo is not None and "Refineria" in df_master.columns:
+            ref_nombre_crudos = st.session_state["refinerias"][ref_id_crudos_activo]["nombre"]
+            df_master = df_master[df_master["Refineria"] == ref_nombre_crudos]
     
         st.subheader("Crudos involucrados")
     
@@ -4811,6 +4917,10 @@ with tabs[3]:
     if "df_master_global" in st.session_state:
     
         df_master = st.session_state["df_master_global"]
+
+        if ref_id_crudos_activo is not None and "Refineria" in df_master.columns:
+            ref_nombre_crudos = st.session_state["refinerias"][ref_id_crudos_activo]["nombre"]
+            df_master = df_master[df_master["Refineria"] == ref_nombre_crudos]
     
         seg_encima = df_encima["Segmento"].unique()
         seg_debajo = df_debajo["Segmento"].unique()
@@ -4822,21 +4932,30 @@ with tabs[3]:
     
     st.markdown("## 🛢️ Análisis por cestas de crudo")
 
-    if uploaded_crudos is not None:
-    
-        hojas = leer_archivo(uploaded_crudos)
-        hoja = list(hojas.keys())[0]
-        df_crudos = hojas[hoja]
-    
-        detalle_crudos = procesar_crudos(df_crudos)
-        st.session_state["detalle_crudos_global"] = detalle_crudos
-    
+    df_cestas = pd.DataFrame()
+    detalle_crudos = detalle_crudos_ref
+
+    if len(ref_ids_seleccionados) > 1:
+        st.warning("Selecciona sondas de una sola refineria para analizar cestas de crudo.")
+
+    elif detalle_crudos is None or detalle_crudos.empty:
+        st.info("La refineria seleccionada no tiene archivo de crudos asignado.")
+
+    else:
+
         cestas = construir_cestas_crudo(detalle_crudos)
+
+        df_proc_ref = (
+            st.session_state
+            .get("refinerias", {})
+            .get(ref_id_crudos_activo, {})
+            .get("df_proc")
+        )
     
         df_cestas = analizar_cestas(
             cestas,
             df_validos,
-            st.session_state.get("df_proc")
+            df_proc_ref
         )
     
         if not df_cestas.empty:
@@ -4864,6 +4983,7 @@ with tabs[3]:
     
     st.markdown("## 🔬 Análisis avanzado de cestas (robusto con pocos datos)")
     st.session_state["df_cestas_global"] = df_cestas
+    st.session_state["detalle_crudos_cestas_global"] = detalle_crudos
     
     # =========================
     # ENRIQUECER RANKING
@@ -5443,7 +5563,10 @@ with tabs[4]:
         # =========================
         df_model = construir_dataset_modelo_cestas(
             df_cestas,
-            st.session_state.get("detalle_crudos_global"),
+            st.session_state.get(
+                "detalle_crudos_cestas_global",
+                st.session_state.get("detalle_crudos_global")
+            ),
             st.session_state.get("df_propiedades_crudos")
         )
         # =========================================
@@ -6056,7 +6179,10 @@ with tabs[4]:
         # =========================================
         df_base_corr = construir_dataset_modelo_cestas(
             df_cestas,
-            st.session_state.get("detalle_crudos_global"),
+            st.session_state.get(
+                "detalle_crudos_cestas_global",
+                st.session_state.get("detalle_crudos_global")
+            ),
             st.session_state.get("df_propiedades_crudos")
         )
         
