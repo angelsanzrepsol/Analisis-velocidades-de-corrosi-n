@@ -23,7 +23,11 @@ import io
 import re
 
 import json
-def construir_dataset_modelo_cestas(df_cestas):
+def construir_dataset_modelo_cestas(
+    df_cestas,
+    detalle_crudos=None,
+    df_propiedades_crudos=None
+):
 
     if df_cestas is None or df_cestas.empty:
         return pd.DataFrame()
@@ -34,16 +38,102 @@ def construir_dataset_modelo_cestas(df_cestas):
     df["Velocidad experimental"] = df["Velocidad"]
 
     # 🔥 One-hot encoding de especies
-    especies_split = df["Especies"].str.split(", ")
+    if "Especies" in df.columns:
 
-    especies_unicas = sorted(set(
-        e for sub in especies_split for e in sub
-    ))
-
-    for esp in especies_unicas:
-        df[f"ESP_{esp}"] = especies_split.apply(
-            lambda x: 1 if esp in x else 0
+        especies_split = (
+            df["Especies"]
+            .fillna("")
+            .astype(str)
+            .apply(lambda x: [e.strip() for e in x.split(",") if e.strip()])
         )
+
+        especies_unicas = sorted(set(
+            e for sub in especies_split for e in sub
+        ))
+
+        for esp in especies_unicas:
+            df[f"ESP_{esp}"] = especies_split.apply(
+                lambda x: 1 if esp in x else 0
+            )
+
+    # Porcentaje real de cada crudo en el intervalo de cada cesta/segmento
+    if (
+        detalle_crudos is not None
+        and not detalle_crudos.empty
+        and {"Fecha", "Especie", "Porcentaje"}.issubset(detalle_crudos.columns)
+        and {"Fecha_ini", "Fecha_fin"}.issubset(df.columns)
+    ):
+
+        detalle = detalle_crudos.copy()
+        detalle["Fecha"] = pd.to_datetime(detalle["Fecha"], errors="coerce")
+        detalle["Porcentaje"] = pd.to_numeric(
+            detalle["Porcentaje"],
+            errors="coerce"
+        )
+        detalle["Especie"] = detalle["Especie"].astype(str).str.strip()
+
+        tan_dict = {}
+
+        if (
+            df_propiedades_crudos is not None
+            and not df_propiedades_crudos.empty
+            and {"Especie", "TAN"}.issubset(df_propiedades_crudos.columns)
+        ):
+            props = df_propiedades_crudos.copy()
+            props["Especie"] = props["Especie"].astype(str).str.strip()
+            props["TAN"] = pd.to_numeric(props["TAN"], errors="coerce")
+            tan_dict = (
+                props.dropna(subset=["Especie"])
+                .set_index("Especie")["TAN"]
+                .to_dict()
+            )
+
+        for idx, cesta in df.iterrows():
+
+            fi = pd.to_datetime(cesta.get("Fecha_ini"), errors="coerce")
+            ff = pd.to_datetime(cesta.get("Fecha_fin"), errors="coerce")
+
+            if pd.isna(fi) or pd.isna(ff):
+                continue
+
+            sub = detalle[
+                (detalle["Fecha"] >= fi) &
+                (detalle["Fecha"] <= ff)
+            ]
+
+            if sub.empty:
+                continue
+
+            suma = sub.groupby("Especie")["Porcentaje"].sum()
+            total = suma.sum()
+
+            if pd.isna(total) or total <= 0:
+                continue
+
+            pct = suma / total * 100
+
+            for crudo, val in pct.items():
+
+                crudo = str(crudo).strip()
+                col_pct = f"CRUDO_{crudo}"
+
+                if col_pct not in df.columns:
+                    df[col_pct] = 0.0
+
+                df.at[idx, col_pct] = val
+
+                if crudo in tan_dict:
+                    col_tan = f"TAN_CRUDO_{crudo}"
+
+                    if col_tan not in df.columns:
+                        df[col_tan] = np.nan
+
+                    df.at[idx, col_tan] = tan_dict[crudo]
+
+        cols_crudos = [c for c in df.columns if c.startswith("CRUDO_")]
+
+        if cols_crudos:
+            df[cols_crudos] = df[cols_crudos].fillna(0.0)
 
     return df
 def analisis_desviacion_por_cesta(
@@ -3207,6 +3297,7 @@ if uploaded_crudos is not None:
             df_crudos = hojas_crudos[hoja_crudos]
 
             detalle_crudos = procesar_crudos(df_crudos)
+            st.session_state["detalle_crudos_global"] = detalle_crudos
 
             df_master = construir_dataset_crudos_segmentos(
                 detalle_crudos,
@@ -4738,6 +4829,7 @@ with tabs[3]:
         df_crudos = hojas[hoja]
     
         detalle_crudos = procesar_crudos(df_crudos)
+        st.session_state["detalle_crudos_global"] = detalle_crudos
     
         cestas = construir_cestas_crudo(detalle_crudos)
     
@@ -5349,7 +5441,11 @@ with tabs[4]:
         # =========================
         # DATASET
         # =========================
-        df_model = construir_dataset_modelo_cestas(df_cestas)
+        df_model = construir_dataset_modelo_cestas(
+            df_cestas,
+            st.session_state.get("detalle_crudos_global"),
+            st.session_state.get("df_propiedades_crudos")
+        )
         # =========================================
         # 🧪 LEER TAN DESDE EXCEL
         # =========================================
@@ -5374,8 +5470,9 @@ with tabs[4]:
         # VARIABLES
         vars_proceso = st.session_state.get("vars_proceso", [])
         vars_especies = [c for c in df_model.columns if c.startswith("ESP_")]
+        vars_crudos = [c for c in df_model.columns if c.startswith("CRUDO_")]
         
-        vars_modelo = vars_proceso + vars_especies
+        vars_modelo = vars_proceso + vars_especies + vars_crudos
         
         # LIMPIEZA
         vars_modelo = [v for v in vars_modelo if v in df_model.columns]
@@ -5518,8 +5615,13 @@ with tabs[4]:
             c for c in df_model.columns
             if c.startswith("ESP_")
         ]
+
+        vars_crudos = [
+            c for c in df_model.columns
+            if c.startswith("CRUDO_")
+        ]
     
-        vars_modelo = vars_proceso + vars_especies
+        vars_modelo = vars_proceso + vars_especies + vars_crudos
         # =========================================
         # 🧹 LIMPIEZA VARIABLES (CRÍTICO)
         # =========================================
@@ -5568,12 +5670,21 @@ with tabs[4]:
             
                 for var, imp in data["importancias"].items():
             
-                    # solo variables de proceso (evita columnas raras)
+                    tipo_variable = None
+
                     if var in st.session_state.get("vars_proceso", []):
+                        tipo_variable = "Proceso"
+                    elif var.startswith("ESP_"):
+                        tipo_variable = "Especie"
+                    elif var.startswith("CRUDO_"):
+                        tipo_variable = "Crudo"
+
+                    if tipo_variable is not None:
             
                         importancias_all.append({
                             "Modelo": nombre,
                             "Variable": var,
+                            "Tipo": tipo_variable,
                             "Importancia": imp
                         })
             
@@ -5587,9 +5698,10 @@ with tabs[4]:
                     df_imp_all,
                     x="Variable",
                     y="Importancia",
-                    color="Modelo",
+                    color="Tipo",
+                    facet_col="Modelo",
                     barmode="group",
-                    title="Importancia de variables de proceso por modelo ML"
+                    title="Importancia de proceso, especies y crudos por modelo ML"
                 )
             
                 fig.update_layout(
@@ -5882,10 +5994,11 @@ with tabs[4]:
             # 4️⃣ VARIABLES MÁS INFLUYENTES
             # =========================
             vars_proc = st.session_state.get("vars_proceso", [])
+            vars_corr = vars_proc + cols_crudos
         
             resultados = []
         
-            for var in vars_proc:
+            for var in vars_corr:
         
                 if var not in df.columns:
                     continue
@@ -5899,13 +6012,14 @@ with tabs[4]:
         
                 resultados.append({
                     "Variable": var,
+                    "Tipo": "Crudo" if var.startswith("CRUDO_") else "Proceso",
                     "Impacto": abs(corr)
                 })
         
             if resultados:
                 df_vars = pd.DataFrame(resultados).sort_values("Impacto", ascending=False)
         
-                st.markdown("### ⚙️ Variables más influyentes")
+                st.markdown("### Variables y crudos mas influyentes")
                 st.dataframe(df_vars)
         
             # =========================
@@ -5940,14 +6054,18 @@ with tabs[4]:
         # =========================================
         # 🧪 DATASET BASE PARA CORRELACIÓN (SIN FILTRO)
         # =========================================
-        df_base_corr = construir_dataset_modelo_cestas(df_cestas)
+        df_base_corr = construir_dataset_modelo_cestas(
+            df_cestas,
+            st.session_state.get("detalle_crudos_global"),
+            st.session_state.get("df_propiedades_crudos")
+        )
         
         st.subheader("DEBUG correlación")
         
         st.write("Filas totales:", len(df_base_corr))
         
         for col in df_base_corr.columns:
-            if col.startswith("ESP_"):
+            if col.startswith(("ESP_", "CRUDO_")):
                 st.write(col, "→ casos >0:", (df_base_corr[col] > 0).sum())
         # =========================================
         # 🔎 FILTRAR ESPECIES CON DATOS
@@ -5960,10 +6078,27 @@ with tabs[4]:
                     cols_validas.append(col)
         
         st.write("Especies válidas:", cols_validas)
+        cols_corr_validas = []
+        vars_proc_corr = st.session_state.get("vars_proceso", [])
+
+        for col in df_base_corr.columns:
+
+            if not (
+                col.startswith(("ESP_", "CRUDO_"))
+                or col in vars_proc_corr
+            ):
+                continue
+
+            serie = pd.to_numeric(df_base_corr[col], errors="coerce")
+
+            if serie.notna().sum() >= 2 and serie.nunique(dropna=True) > 1:
+                cols_corr_validas.append(col)
+
+        st.write("Variables para correlacion:", cols_corr_validas)
         # =========================
         # IMPORTANCIA ESPECIES
         # =========================
-        st.subheader("Importancia de especies")
+        st.subheader("Importancia de especies y crudos")
     
         imp_total = []
     
@@ -5971,11 +6106,19 @@ with tabs[4]:
     
             for var, imp in data["importancias"].items():
     
-                if var.startswith("ESP_"):
+                if var.startswith(("ESP_", "CRUDO_")):
+
+                    if var.startswith("CRUDO_"):
+                        tipo = "Crudo"
+                        variable = var.replace("CRUDO_", "")
+                    else:
+                        tipo = "Especie"
+                        variable = var.replace("ESP_", "")
     
                     imp_total.append({
                         "Modelo": nombre,
-                        "Especie": var.replace("ESP_", ""),
+                        "Tipo": tipo,
+                        "Variable": variable,
                         "Importancia": imp
                     })
     
@@ -6026,29 +6169,51 @@ with tabs[4]:
         
         resultados = []
         
-        for col in cols_validas:
+        for col in cols_corr_validas:
         
-            sub = df_base_corr[[col, "Velocidad experimental"]].dropna()
+            sub = df_base_corr[[col, "Velocidad experimental"]].copy()
+            sub[col] = pd.to_numeric(sub[col], errors="coerce")
+            sub["Velocidad experimental"] = pd.to_numeric(
+                sub["Velocidad experimental"],
+                errors="coerce"
+            )
+            sub = sub.dropna()
         
-            if len(sub) < 2:
+            if (
+                len(sub) < 2
+                or sub[col].std() == 0
+                or sub["Velocidad experimental"].std() == 0
+            ):
                 continue
         
             corr = np.corrcoef(
                 sub[col],
                 sub["Velocidad experimental"]
             )[0,1]
+
+            if col.startswith("ESP_"):
+                tipo = "Especie"
+                variable = col.replace("ESP_", "")
+            elif col.startswith("CRUDO_"):
+                tipo = "Crudo"
+                variable = col.replace("CRUDO_", "")
+            else:
+                tipo = "Proceso"
+                variable = col
         
             resultados.append({
-                "Especie": col.replace("ESP_", ""),
-                "Correlacion": corr
+                "Tipo": tipo,
+                "Variable": variable,
+                "Correlacion": corr,
+                "Impacto": abs(corr)
             })
         
         df_corr = pd.DataFrame(resultados)
         
-        st.subheader("Correlación directa especies vs corrosión")
+        st.subheader("Correlacion directa: proceso, crudos y especies vs corrosion")
         
         if not df_corr.empty:
-            st.dataframe(df_corr.sort_values("Correlacion", key=abs, ascending=False))
+            st.dataframe(df_corr.sort_values("Impacto", ascending=False))
         else:
             st.info("No hay suficientes datos para correlación")
         # =====================================================
