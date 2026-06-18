@@ -923,10 +923,75 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa=None, materia
             fila["Desviación estándar"] = std
             fila["Coef Variación (%)"] = cv
 
-            # Todavía sin MPA
-            fila["Velocidad esperada"] = None
-            fila["Dif Real vs Esperada"] = None
-            fila["Dif absoluta"] = None
+            # =========================================
+            # MPA por refinería y por segmento
+            # =========================================
+            
+            vel_mpa_sondas = []
+            
+            for key2, data2 in processed_ref.items():
+            
+                for seg2 in data2.get("segmentos_validos", []):
+            
+                    fi2 = pd.to_datetime(seg2.get("fecha_ini"))
+                    ff2 = pd.to_datetime(seg2.get("fecha_fin"))
+            
+                    if fi2 == fi_ref and ff2 == ff_ref:
+            
+                        medias = seg2.get("medias", {})
+            
+                        if isinstance(medias, (dict, pd.Series)):
+            
+                            md = dict(medias)
+            
+                            temp = md.get("T", None)
+                            tan = md.get("TAN", None)
+            
+                            if temp is None or pd.isna(temp):
+                                for k3, v3 in md.items():
+                                    nombre = str(k3).lower()
+                                    if (
+                                        "temperatura" in nombre
+                                        or "temperature" in nombre
+                                        or "t salida" in nombre
+                                        or "entrada" in nombre
+                                    ):
+                                        temp = v3
+                                        break
+            
+                            if tan is None or pd.isna(tan):
+                                for k3, v3 in md.items():
+                                    nombre = str(k3).lower()
+                                    if (
+                                        "tan" in nombre
+                                        or "acidez" in nombre
+                                        or "acid" in nombre
+                                    ):
+                                        tan = v3
+                                        break
+            
+                            vel_mpa = buscar_velocidad_mas_cercana(
+                                df_mpa,
+                                temp,
+                                tan,
+                                material
+                            )
+            
+                            if vel_mpa is not None and not pd.isna(vel_mpa):
+                                vel_mpa_sondas.append(vel_mpa)
+            
+                        break
+            
+            vel_esperada = np.mean(vel_mpa_sondas) if vel_mpa_sondas else None
+            
+            fila["Velocidad esperada"] = vel_esperada
+            
+            if vel_esperada is not None and media is not None:
+                fila["Dif Real vs Esperada"] = media - vel_esperada
+                fila["Dif absoluta"] = abs(media - vel_esperada)
+            else:
+                fila["Dif Real vs Esperada"] = None
+                fila["Dif absoluta"] = None
 
             medias_base = seg_base.get("medias", {})
 
