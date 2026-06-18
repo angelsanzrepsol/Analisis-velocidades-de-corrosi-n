@@ -1027,11 +1027,16 @@ def procesar_crudos(df):
     # -----------------------------
     def es_carga_comb(col):
         c = col.lower()
+    
         return (
-            "carga" in c and
-            ("comb" in c or "combustible" in c)
+            "carga" in c
+            and (
+                "comp" in c
+                or "porccomp" in c
+                or "comb" in c
+                or "combustible" in c
+            )
         )
-
     comp_cols = [
         c for c in df.columns
         if "comp" in c.lower()
@@ -1044,6 +1049,8 @@ def procesar_crudos(df):
         if "porccomp" in c.lower()
         and es_carga_comb(c)
     ]
+    st.write("COMP detectadas:", comp_cols)
+    st.write("PORCCOMP detectadas:", porc_cols)
     comp_cols = sorted(comp_cols)
     porc_cols = sorted(porc_cols)
     st.write("COLUMNAS ARCHIVO CRUDOS:", list(df.columns))
