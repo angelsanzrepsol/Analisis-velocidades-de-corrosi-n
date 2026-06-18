@@ -3418,7 +3418,12 @@ for ref_id, ref_data in st.session_state["refinerias"].items():
         st.session_state["refinerias"][ref_id]["df_proc"] = df_proc
         st.session_state["refinerias"][ref_id]["vars_proceso"] = vars_proceso
         st.sidebar.success(f"Archivo de proceso cargado: {len(df_proc)} filas, {len(vars_proceso)} variables.")
-    
+    except Exception as e:
+        st.sidebar.error(
+            f"Error leyendo proceso para {ref_data['nombre']}: {e}"
+        )
+        st.session_state["refinerias"][ref_id]["df_proc"] = None
+        st.session_state["refinerias"][ref_id]["vars_proceso"] = []
 # =========================================
 # CREAR DATASET GLOBAL DE CRUDOS
 # =========================================
@@ -3481,9 +3486,7 @@ if df_master_global:
         df_master_global,
         ignore_index=True
     )
-    except Exception as e:
-        st.sidebar.error(f"Error al leer archivo de proceso: {e}")
- 
+
 # -------------------- TAB 1: Procesar hoja --------------------
 with tabs[0]:
     st.header("Procesamiento de hoja")
