@@ -908,7 +908,7 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
         if vel_esperada is not None and media is not None:
             fila["Dif Real vs Esperada"] = media - vel_esperada
             fila["Dif absoluta"] = abs(fila["Dif Real vs Esperada"])
-
+        medias_proc = seg_base.get("medias")
         # =========================================
         # VARIABLES PROCESO (una sola vez)
         # =========================================
