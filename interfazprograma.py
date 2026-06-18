@@ -784,8 +784,49 @@ def analizar_importancia_proceso(df, vars_proceso):
         "Valor absoluto",
         ascending=False
     )
+def recalcular_medias_segmentos_por_refineria(processed_sheets):
 
+    refinerias = st.session_state.get("refinerias", {})
+
+    for key, data in processed_sheets.items():
+
+        ref_id = data.get("refineria_id")
+
+        if ref_id is None or ref_id not in refinerias:
+            continue
+
+        df_proc = refinerias[ref_id].get("df_proc")
+
+        if df_proc is None or df_proc.empty:
+            continue
+
+        df_proc = df_proc.copy()
+        df_proc["Fecha"] = pd.to_datetime(df_proc["Fecha"], errors="coerce")
+
+        for seg in data.get("segmentos_validos", []):
+
+            fi = pd.to_datetime(seg.get("fecha_ini"), errors="coerce")
+            ff = pd.to_datetime(seg.get("fecha_fin"), errors="coerce")
+
+            if pd.isna(fi) or pd.isna(ff):
+                continue
+
+            sub = df_proc[
+                (df_proc["Fecha"] >= fi) &
+                (df_proc["Fecha"] <= ff)
+            ]
+
+            medias = sub.mean(numeric_only=True)
+
+            if medias.empty:
+                medias = df_proc.mean(numeric_only=True)
+
+            seg["medias"] = medias
+
+    return processed_sheets
 def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
+
+    processed_sheets = recalcular_medias_segmentos_por_refineria(processed_sheets)
 
     processed = {
         k: v for k, v in processed_sheets.items()
