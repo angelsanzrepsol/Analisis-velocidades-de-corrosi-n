@@ -836,7 +836,6 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa=None, materia
 
     filas = []
 
-    # Agrupar sondas por refinería
     grupos_refineria = {}
 
     for key, data in processed.items():
@@ -853,7 +852,6 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa=None, materia
 
         grupos_refineria.setdefault(ref_id, {})[key] = data
 
-    # Procesar cada refinería de forma independiente
     for ref_id, processed_ref in grupos_refineria.items():
 
         primera = list(processed_ref.values())[0]
@@ -878,8 +876,8 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa=None, materia
             }
 
             velocidades = []
+            vel_mpa_sondas = []
 
-            # Comparar solo sondas de ESTA refinería
             for key, data in processed_ref.items():
 
                 nombre_sonda = f"{data['source_name']} | {data['hoja']}"
@@ -903,6 +901,52 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa=None, materia
                         )
 
                         texto_calidad = clasificar_calidad(calidad)
+
+                        # =========================
+                        # MPA DE ESTA SONDA
+                        # =========================
+                        medias = seg.get("medias", {})
+
+                        if df_mpa is not None and isinstance(medias, (dict, pd.Series)):
+
+                            md = dict(medias)
+
+                            temp = md.get("T", None)
+                            tan = md.get("TAN", None)
+
+                            if temp is None or pd.isna(temp):
+                                for k2, v2 in md.items():
+                                    nombre_col = str(k2).lower()
+                                    if (
+                                        "temperatura" in nombre_col
+                                        or "temperature" in nombre_col
+                                        or "t salida" in nombre_col
+                                        or "entrada" in nombre_col
+                                    ):
+                                        temp = v2
+                                        break
+
+                            if tan is None or pd.isna(tan):
+                                for k2, v2 in md.items():
+                                    nombre_col = str(k2).lower()
+                                    if (
+                                        "tan" in nombre_col
+                                        or "acidez" in nombre_col
+                                        or "acid" in nombre_col
+                                    ):
+                                        tan = v2
+                                        break
+
+                            vel_mpa = buscar_velocidad_mas_cercana(
+                                df_mpa,
+                                temp,
+                                tan,
+                                material
+                            )
+
+                            if vel_mpa is not None and not pd.isna(vel_mpa):
+                                vel_mpa_sondas.append(vel_mpa)
+
                         break
 
                 fila[f"{nombre_sonda} Velocidad"] = vel
@@ -919,73 +963,17 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa=None, materia
             else:
                 media, std, cv = None, None, None
 
+            vel_esperada = (
+                np.mean(vel_mpa_sondas)
+                if vel_mpa_sondas
+                else None
+            )
+
             fila["Media velocidades"] = media
             fila["Desviación estándar"] = std
             fila["Coef Variación (%)"] = cv
-
-            # =========================================
-            # MPA por refinería y por segmento
-            # =========================================
-            
-            vel_mpa_sondas = []
-            
-            for key2, data2 in processed_ref.items():
-            
-                for seg2 in data2.get("segmentos_validos", []):
-            
-                    fi2 = pd.to_datetime(seg2.get("fecha_ini"))
-                    ff2 = pd.to_datetime(seg2.get("fecha_fin"))
-            
-                    if fi2 == fi_ref and ff2 == ff_ref:
-            
-                        medias = seg2.get("medias", {})
-            
-                        if isinstance(medias, (dict, pd.Series)):
-            
-                            md = dict(medias)
-            
-                            temp = md.get("T", None)
-                            tan = md.get("TAN", None)
-            
-                            if temp is None or pd.isna(temp):
-                                for k3, v3 in md.items():
-                                    nombre = str(k3).lower()
-                                    if (
-                                        "temperatura" in nombre
-                                        or "temperature" in nombre
-                                        or "t salida" in nombre
-                                        or "entrada" in nombre
-                                    ):
-                                        temp = v3
-                                        break
-            
-                            if tan is None or pd.isna(tan):
-                                for k3, v3 in md.items():
-                                    nombre = str(k3).lower()
-                                    if (
-                                        "tan" in nombre
-                                        or "acidez" in nombre
-                                        or "acid" in nombre
-                                    ):
-                                        tan = v3
-                                        break
-            
-                            vel_mpa = buscar_velocidad_mas_cercana(
-                                df_mpa,
-                                temp,
-                                tan,
-                                material
-                            )
-            
-                            if vel_mpa is not None and not pd.isna(vel_mpa):
-                                vel_mpa_sondas.append(vel_mpa)
-            
-                        break
-            
-            vel_esperada = np.mean(vel_mpa_sondas) if vel_mpa_sondas else None
-            
             fila["Velocidad esperada"] = vel_esperada
-            
+
             if vel_esperada is not None and media is not None:
                 fila["Dif Real vs Esperada"] = media - vel_esperada
                 fila["Dif absoluta"] = abs(media - vel_esperada)
@@ -1002,7 +990,6 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa=None, materia
             filas.append(fila)
 
     return pd.DataFrame(filas)
-
 def json_safe(obj):
 
     # pandas Timestamp
