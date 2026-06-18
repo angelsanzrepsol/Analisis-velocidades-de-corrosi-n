@@ -2889,6 +2889,51 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
     fila = df_tmp.loc[df_tmp["dist"].idxmin()]
 
     return fila[col_material]
+def rellenar_mpa_en_tabla(df, df_mpa, material):
+
+    if df is None or df.empty or df_mpa is None or df_mpa.empty:
+        return df
+
+    df = df.copy()
+
+    # localizar columna temperatura
+    col_temp = None
+    for c in df.columns:
+        cl = str(c).lower()
+        if c == "T" or "temperatura" in cl or "temperature" in cl or "t salida" in cl:
+            col_temp = c
+            break
+
+    # localizar columna TAN/acidez
+    col_tan = None
+    for c in df.columns:
+        cl = str(c).lower()
+        if c == "TAN" or "tan" in cl or "acidez" in cl or "acid" in cl:
+            col_tan = c
+            break
+
+    if col_temp is None or col_tan is None:
+        st.warning("No encuentro columnas de temperatura/TAN para aplicar MPA.")
+        return df
+
+    def calc(row):
+        temp = pd.to_numeric(row.get(col_temp), errors="coerce")
+        tan = pd.to_numeric(row.get(col_tan), errors="coerce")
+
+        if pd.isna(temp) or pd.isna(tan):
+            return np.nan
+
+        return buscar_velocidad_mas_cercana(
+            df_mpa,
+            temp,
+            tan,
+            material
+        )
+
+    df["Velocidad esperada"] = df.apply(calc, axis=1)
+    df["Velocidad teórica"] = df["Velocidad esperada"]
+
+    return df
 def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
 
     if df_comp is None or df_comp.empty:
@@ -4258,6 +4303,11 @@ with tabs[2]:
         st.session_state.get("df_mpa"),
         material_sel
     )
+    df_comp = rellenar_mpa_en_tabla(
+        df_comp,
+        st.session_state.get("df_mpa"),
+        material_sel
+    )
     # ======================================
     # ANALISIS IMPORTANCIA VARIABLES PROCESO
     # ======================================
@@ -4802,7 +4852,11 @@ with tabs[3]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-    
+    df_comp = rellenar_mpa_en_tabla(
+        df_comp,
+        st.session_state.get("df_mpa"),
+        material_sel
+    )
     # aplicar filtro de error
     processed_filtrado = aplicar_umbral_error_segmentos(
         processed_filtrado,
@@ -4813,6 +4867,11 @@ with tabs[3]:
     # 🔥 RECONSTRUIR tabla ya filtrada
     df_comp = construir_tabla_segmentos_comparativa(
         processed_filtrado,
+        st.session_state.get("df_mpa"),
+        material_sel
+    )
+    df_comp = rellenar_mpa_en_tabla(
+        df_comp,
         st.session_state.get("df_mpa"),
         material_sel
     )
