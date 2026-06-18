@@ -2242,9 +2242,9 @@ for uploaded_proc in uploaded_procs or []:
     if ref_id:
 
         st.session_state["refinerias"][ref_id]["archivo_proceso"] = uploaded_proc
-
 for data in st.session_state["refinerias"].values():
-    data["archivo_crudos"] = None
+    data.setdefault("archivo_crudos", None)
+    data.setdefault("detalle_crudos", None)
 
 st.sidebar.markdown("---")
 st.sidebar.header("Asignacion crudos -> refineria")
@@ -3333,69 +3333,7 @@ def recalcular_segmento_local_fallback(df_filtrado, y_suave, segmento, df_proc, 
 # -------------------- Session storage --------------------
 if "processed_sheets" not in st.session_state:
     st.session_state["processed_sheets"] = {}
-    
-# =========================================
-# CREAR DATASET GLOBAL DE CRUDOS
-# =========================================
 
-st.session_state.pop("detalle_crudos_global", None)
-st.session_state.pop("df_master_global", None)
-
-detalle_crudos_global = []
-df_master_global = []
-
-for ref_id, ref_data in st.session_state.get("refinerias", {}).items():
-
-    uploaded_crudo = ref_data.get("archivo_crudos")
-
-    if uploaded_crudo is None:
-        st.session_state["refinerias"][ref_id]["detalle_crudos"] = None
-        continue
-
-    try:
-
-        detalle_crudos = cargar_detalle_crudos(uploaded_crudo)
-
-        if detalle_crudos.empty:
-            st.session_state["refinerias"][ref_id]["detalle_crudos"] = None
-            continue
-
-        detalle_crudos = detalle_crudos.copy()
-        detalle_crudos["Refineria"] = ref_data["nombre"]
-        st.session_state["refinerias"][ref_id]["detalle_crudos"] = detalle_crudos
-        detalle_crudos_global.append(detalle_crudos)
-
-        processed_ref = {
-            k: v
-            for k, v in st.session_state.get("processed_sheets", {}).items()
-            if k.startswith(f"proc|{ref_id}|")
-        }
-
-        df_master = construir_dataset_crudos_segmentos(
-            detalle_crudos,
-            processed_ref
-        )
-
-        if not df_master.empty:
-            df_master["Segmento"] = "Seg " + df_master["Segmento"].astype(str)
-            df_master["Refineria"] = ref_data["nombre"]
-            df_master_global.append(df_master)
-
-    except Exception as e:
-
-        st.warning(f"No se pudo generar dataset de crudos para {ref_data['nombre']}: {e}")
-
-if detalle_crudos_global:
-    st.session_state["detalle_crudos_global"] = pd.concat(
-        detalle_crudos_global,
-        ignore_index=True
-    )
-
-if df_master_global:
-    st.session_state["df_master_global"] = pd.concat(
-        df_master_global,
-        ignore_index=True
-    )
 # -------------------- Pestañas UI --------------------
 tabs = st.tabs([
     "Procesar hoja",
@@ -3480,7 +3418,69 @@ for ref_id, ref_data in st.session_state["refinerias"].items():
         st.session_state["refinerias"][ref_id]["df_proc"] = df_proc
         st.session_state["refinerias"][ref_id]["vars_proceso"] = vars_proceso
         st.sidebar.success(f"Archivo de proceso cargado: {len(df_proc)} filas, {len(vars_proceso)} variables.")
+    
+# =========================================
+# CREAR DATASET GLOBAL DE CRUDOS
+# =========================================
 
+st.session_state.pop("detalle_crudos_global", None)
+st.session_state.pop("df_master_global", None)
+
+detalle_crudos_global = []
+df_master_global = []
+
+for ref_id, ref_data in st.session_state.get("refinerias", {}).items():
+
+    uploaded_crudo = ref_data.get("archivo_crudos")
+
+    if uploaded_crudo is None:
+        st.session_state["refinerias"][ref_id]["detalle_crudos"] = None
+        continue
+
+    try:
+
+        detalle_crudos = cargar_detalle_crudos(uploaded_crudo)
+
+        if detalle_crudos.empty:
+            st.session_state["refinerias"][ref_id]["detalle_crudos"] = None
+            continue
+
+        detalle_crudos = detalle_crudos.copy()
+        detalle_crudos["Refineria"] = ref_data["nombre"]
+        st.session_state["refinerias"][ref_id]["detalle_crudos"] = detalle_crudos
+        detalle_crudos_global.append(detalle_crudos)
+
+        processed_ref = {
+            k: v
+            for k, v in st.session_state.get("processed_sheets", {}).items()
+            if k.startswith(f"proc|{ref_id}|")
+        }
+
+        df_master = construir_dataset_crudos_segmentos(
+            detalle_crudos,
+            processed_ref
+        )
+
+        if not df_master.empty:
+            df_master["Segmento"] = "Seg " + df_master["Segmento"].astype(str)
+            df_master["Refineria"] = ref_data["nombre"]
+            df_master_global.append(df_master)
+
+    except Exception as e:
+
+        st.warning(f"No se pudo generar dataset de crudos para {ref_data['nombre']}: {e}")
+
+if detalle_crudos_global:
+    st.session_state["detalle_crudos_global"] = pd.concat(
+        detalle_crudos_global,
+        ignore_index=True
+    )
+
+if df_master_global:
+    st.session_state["df_master_global"] = pd.concat(
+        df_master_global,
+        ignore_index=True
+    )
     except Exception as e:
         st.sidebar.error(f"Error al leer archivo de proceso: {e}")
  
