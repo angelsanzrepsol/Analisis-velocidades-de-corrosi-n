@@ -863,111 +863,55 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
             }
 
             velocidades = []
+            # =========================================
+            # VELOCIDAD ESPERADA MPA
+            # =========================================
+            
             vel_mpa_sondas = []
-
-            for key, data in processed_ref.items():
-
-                nombre_sonda = f"{data['source_name']} | {data['hoja']}"
-
-                vel = None
-                calidad = None
-                texto_calidad = "Sin datos"
-
-                for seg in data.get("segmentos_validos", []):
-
-                    fi = pd.to_datetime(seg.get("fecha_ini"))
-                    ff = pd.to_datetime(seg.get("fecha_fin"))
-
-                    if fi == fi_ref and ff == ff_ref:
-
-                        vel = seg.get("vel_abs")
-
-                        calidad = calcular_calidad_segmento(
-                            data["df_filtrado"],
-                            seg
-                        )
-
-                        texto_calidad = clasificar_calidad(calidad)
-
-                        medias_proc = seg.get("medias", {})
-
-                        if df_mpa is not None and isinstance(medias_proc, (dict, pd.Series)):
-
-                            md = dict(medias_proc)
-
-                            temp = md.get("T", None)
-                            tan = md.get("TAN", None)
-
-                            if temp is None or pd.isna(temp):
-                                for k2, v2 in md.items():
-                                    nombre = str(k2).lower()
-                                    if (
-                                        "temperatura" in nombre
-                                        or "temperature" in nombre
-                                        or "t salida" in nombre
-                                        or "entrada" in nombre
-                                    ):
-                                        temp = v2
-                                        break
-
-                            if tan is None or pd.isna(tan):
-                                for k2, v2 in md.items():
-                                    nombre = str(k2).lower()
-                                    if (
-                                        "tan" in nombre
-                                        or "acidez" in nombre
-                                        or "acid" in nombre
-                                    ):
-                                        tan = v2
-                                        break
-
-                            temp = pd.to_numeric(temp, errors="coerce")
-                            tan = pd.to_numeric(tan, errors="coerce")
-
-                            if not pd.isna(temp) and not pd.isna(tan):
-                                vel_mpa = buscar_velocidad_mas_cercana(
-                                    df_mpa,
-                                    temp,
-                                    tan,
-                                    material
-                                )
-
-                                if vel_mpa is not None and not pd.isna(vel_mpa):
-                                    vel_mpa_sondas.append(vel_mpa)
-
-                        break
-
-                fila[f"{nombre_sonda} Velocidad"] = vel
-                fila[f"{nombre_sonda} Calidad R2"] = calidad
-                fila[f"{nombre_sonda} Calidad"] = texto_calidad
-
-                if vel is not None and not pd.isna(vel):
-                    velocidades.append(vel)
-
-            if velocidades:
-                media = np.mean(velocidades)
-                std = np.std(velocidades, ddof=1) if len(velocidades) > 1 else 0
-                cv = (std / media) * 100 if media != 0 else None
-            else:
-                media, std, cv = None, None, None
-
-            if vel_mpa_sondas:
-                vel_esperada = np.mean(vel_mpa_sondas)
-            else:
-                vel_esperada = None
-
-            fila["Días segmento"] = seg_base.get("delta_dias")
-            fila["Media velocidades"] = media
-            fila["Desviación estándar"] = std
-            fila["Coef Variación (%)"] = cv
+            
+            for key, data in processed.items():
+            
+                ref_id_sonda = data.get("refineria_id")
+            
+                if ref_id_sonda is None and key.startswith("proc|"):
+                    partes = key.split("|")
+                    if len(partes) > 1:
+                        ref_id_sonda = partes[1]
+            
+                if ref_id_sonda is None:
+                    continue
+            
+                temp, tan = obtener_temp_tan_segmento(
+                    ref_id_sonda,
+                    fi_ref,
+                    ff_ref
+                )
+            
+                if temp is None or tan is None:
+                    continue
+            
+                vel_mpa = buscar_velocidad_mas_cercana(
+                    df_mpa,
+                    temp,
+                    tan,
+                    material
+                )
+            
+                if vel_mpa is not None and not pd.isna(vel_mpa):
+                    vel_mpa_sondas.append(vel_mpa)
+            
+            vel_esperada = np.mean(vel_mpa_sondas) if vel_mpa_sondas else None
+            
             fila["Velocidad esperada"] = vel_esperada
 
-            if vel_esperada is not None and media is not None:
-                fila["Dif Real vs Esperada"] = media - vel_esperada
-                fila["Dif absoluta"] = abs(media - vel_esperada)
+            media_real = fila.get("Media velocidades")
 
+            if vel_esperada is not None and media_real is not None:
+                fila["Dif Real vs Esperada"] = media_real - vel_esperada
+                fila["Dif absoluta"] = abs(media_real - vel_esperada)
+            
             medias_base = seg_base.get("medias", {})
-
+            
             if isinstance(medias_base, (dict, pd.Series)):
                 for k, v in dict(medias_base).items():
                     fila[k] = v
@@ -1263,7 +1207,51 @@ def asignar_crudos_a_segmentos(detalle_crudos, processed_sheets):
         return pd.concat(resultados, ignore_index=True)
 
     return pd.DataFrame()
+def obtener_temp_tan_segmento(ref_id, fi, ff):
 
+    ref_data = st.session_state.get("refinerias", {}).get(ref_id, {})
+    df_proc = ref_data.get("df_proc")
+
+    if df_proc is None or df_proc.empty:
+        return None, None
+
+    dfp = df_proc.copy()
+    dfp["Fecha"] = pd.to_datetime(dfp["Fecha"], errors="coerce")
+
+    sub = dfp[
+        (dfp["Fecha"] >= fi) &
+        (dfp["Fecha"] <= ff)
+    ]
+
+    if sub.empty:
+        sub = dfp
+
+    medias = sub.mean(numeric_only=True)
+
+    temp = medias.get("T", None)
+    tan = medias.get("TAN", None)
+
+    if temp is None or pd.isna(temp):
+        for c in medias.index:
+            cl = str(c).lower()
+            if "temperatura" in cl or "temperature" in cl or "t salida" in cl or "entrada" in cl:
+                temp = medias[c]
+                break
+
+    if tan is None or pd.isna(tan):
+        for c in medias.index:
+            cl = str(c).lower()
+            if "tan" in cl or "acidez" in cl or "acid" in cl:
+                tan = medias[c]
+                break
+
+    temp = pd.to_numeric(temp, errors="coerce")
+    tan = pd.to_numeric(tan, errors="coerce")
+
+    if pd.isna(temp) or pd.isna(tan):
+        return None, None
+
+    return temp, tan
 def construir_dataset_crudos_segmentos(detalle_crudos, processed_sheets):
 
     filas = []
@@ -2889,51 +2877,7 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
     fila = df_tmp.loc[df_tmp["dist"].idxmin()]
 
     return fila[col_material]
-def rellenar_mpa_en_tabla(df, df_mpa, material):
 
-    if df is None or df.empty or df_mpa is None or df_mpa.empty:
-        return df
-
-    df = df.copy()
-
-    # localizar columna temperatura
-    col_temp = None
-    for c in df.columns:
-        cl = str(c).lower()
-        if c == "T" or "temperatura" in cl or "temperature" in cl or "t salida" in cl:
-            col_temp = c
-            break
-
-    # localizar columna TAN/acidez
-    col_tan = None
-    for c in df.columns:
-        cl = str(c).lower()
-        if c == "TAN" or "tan" in cl or "acidez" in cl or "acid" in cl:
-            col_tan = c
-            break
-
-    if col_temp is None or col_tan is None:
-        st.warning("No encuentro columnas de temperatura/TAN para aplicar MPA.")
-        return df
-
-    def calc(row):
-        temp = pd.to_numeric(row.get(col_temp), errors="coerce")
-        tan = pd.to_numeric(row.get(col_tan), errors="coerce")
-
-        if pd.isna(temp) or pd.isna(tan):
-            return np.nan
-
-        return buscar_velocidad_mas_cercana(
-            df_mpa,
-            temp,
-            tan,
-            material
-        )
-
-    df["Velocidad esperada"] = df.apply(calc, axis=1)
-    df["Velocidad teórica"] = df["Velocidad esperada"]
-
-    return df
 def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
 
     if df_comp is None or df_comp.empty:
@@ -4303,11 +4247,7 @@ with tabs[2]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-    df_comp = rellenar_mpa_en_tabla(
-        df_comp,
-        st.session_state.get("df_mpa"),
-        material_sel
-    )
+   
     # ======================================
     # ANALISIS IMPORTANCIA VARIABLES PROCESO
     # ======================================
@@ -4852,11 +4792,7 @@ with tabs[3]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-    df_comp = rellenar_mpa_en_tabla(
-        df_comp,
-        st.session_state.get("df_mpa"),
-        material_sel
-    )
+   
     # aplicar filtro de error
     processed_filtrado = aplicar_umbral_error_segmentos(
         processed_filtrado,
@@ -4870,11 +4806,7 @@ with tabs[3]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-    df_comp = rellenar_mpa_en_tabla(
-        df_comp,
-        st.session_state.get("df_mpa"),
-        material_sel
-    )
+   
     # =========================================
     # TABLA CORREGIDA FINAL
     # =========================================
