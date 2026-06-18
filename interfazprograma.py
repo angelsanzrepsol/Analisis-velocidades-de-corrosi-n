@@ -883,8 +883,20 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
         
                         md = dict(medias_proc_sonda)
         
-                        temp = md.get("T")
-                        tan = md.get("TAN")
+                        temp = md.get("T", None)
+                        tan = md.get("TAN", None)
+                        
+                        if temp is None or pd.isna(temp):
+                            for k, v in md.items():
+                                if "temperatura" in str(k).lower() or "temperature" in str(k).lower() or "t salida" in str(k).lower():
+                                    temp = v
+                                    break
+                        
+                        if tan is None or pd.isna(tan):
+                            for k, v in md.items():
+                                if "tan" in str(k).lower() or "acidez" in str(k).lower() or "acid" in str(k).lower():
+                                    tan = v
+                                    break
         
                         vel_mpa = buscar_velocidad_mas_cercana(
                             df_mpa,
