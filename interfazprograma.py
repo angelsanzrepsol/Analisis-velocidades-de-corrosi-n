@@ -897,7 +897,11 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
                                 if "tan" in str(k).lower() or "acidez" in str(k).lower() or "acid" in str(k).lower():
                                     tan = v
                                     break
-        
+                        temp = pd.to_numeric(temp, errors="coerce")
+                        tan = pd.to_numeric(tan, errors="coerce")
+                        
+                        if pd.isna(temp) or pd.isna(tan):
+                            continue
                         vel_mpa = buscar_velocidad_mas_cercana(
                             df_mpa,
                             temp,
