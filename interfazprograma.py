@@ -824,9 +824,7 @@ def recalcular_medias_segmentos_por_refineria(processed_sheets):
             seg["medias"] = medias
 
     return processed_sheets
-def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
-
-    processed_sheets = recalcular_medias_segmentos_por_refineria(processed_sheets)
+def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa=None, material=None):
 
     processed = {
         k: v for k, v in processed_sheets.items()
@@ -838,17 +836,33 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
 
     filas = []
 
-    # AGRUPAR POR REFINERÍA
-    refinerias_proc = {}
+    # Agrupar sondas por refinería
+    grupos_refineria = {}
 
     for key, data in processed.items():
-        ref_id = data.get("refineria_id", "SIN_REFINERIA")
-        refinerias_proc.setdefault(ref_id, {})[key] = data
 
-    for ref_id, processed_ref in refinerias_proc.items():
+        ref_id = data.get("refineria_id")
+
+        if ref_id is None and key.startswith("proc|"):
+            partes = key.split("|")
+            if len(partes) >= 2:
+                ref_id = partes[1]
+
+        if ref_id is None:
+            ref_id = data.get("source_name", "SIN_REFINERIA")
+
+        grupos_refineria.setdefault(ref_id, {})[key] = data
+
+    # Procesar cada refinería de forma independiente
+    for ref_id, processed_ref in grupos_refineria.items():
 
         primera = list(processed_ref.values())[0]
         segmentos_base = primera.get("segmentos_validos", [])
+
+        ref_nombre = primera.get(
+            "refineria_nombre",
+            primera.get("source_name", ref_id)
+        )
 
         for i, seg_base in enumerate(segmentos_base, start=1):
 
@@ -856,62 +870,66 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
             ff_ref = pd.to_datetime(seg_base.get("fecha_fin"))
 
             fila = {
-                "Refineria": primera.get("refineria_nombre", primera.get("source_name")),
+                "Refineria": ref_nombre,
                 "Segmento": f"Seg {i}",
                 "Inicio": fi_ref,
-                "Fin": ff_ref
+                "Fin": ff_ref,
+                "Días segmento": seg_base.get("delta_dias")
             }
 
             velocidades = []
-            # =========================================
-            # VELOCIDAD ESPERADA MPA
-            # =========================================
-            
-            vel_mpa_sondas = []
-            
-            for key, data in processed.items():
-            
-                ref_id_sonda = data.get("refineria_id")
-            
-                if ref_id_sonda is None and key.startswith("proc|"):
-                    partes = key.split("|")
-                    if len(partes) > 1:
-                        ref_id_sonda = partes[1]
-            
-                if ref_id_sonda is None:
-                    continue
-            
-                temp, tan = obtener_temp_tan_segmento(
-                    ref_id_sonda,
-                    fi_ref,
-                    ff_ref
-                )
-            
-                if temp is None or tan is None:
-                    continue
-            
-                vel_mpa = buscar_velocidad_mas_cercana(
-                    df_mpa,
-                    temp,
-                    tan,
-                    material
-                )
-            
-                if vel_mpa is not None and not pd.isna(vel_mpa):
-                    vel_mpa_sondas.append(vel_mpa)
-            
-            vel_esperada = np.mean(vel_mpa_sondas) if vel_mpa_sondas else None
-            
-            fila["Velocidad esperada"] = vel_esperada
 
-            media_real = fila.get("Media velocidades")
+            # Comparar solo sondas de ESTA refinería
+            for key, data in processed_ref.items():
 
-            if vel_esperada is not None and media_real is not None:
-                fila["Dif Real vs Esperada"] = media_real - vel_esperada
-                fila["Dif absoluta"] = abs(media_real - vel_esperada)
-            
+                nombre_sonda = f"{data['source_name']} | {data['hoja']}"
+
+                vel = None
+                calidad = None
+                texto_calidad = "Sin datos"
+
+                for seg in data.get("segmentos_validos", []):
+
+                    fi = pd.to_datetime(seg.get("fecha_ini"))
+                    ff = pd.to_datetime(seg.get("fecha_fin"))
+
+                    if fi == fi_ref and ff == ff_ref:
+
+                        vel = seg.get("vel_abs")
+
+                        calidad = calcular_calidad_segmento(
+                            data["df_filtrado"],
+                            seg
+                        )
+
+                        texto_calidad = clasificar_calidad(calidad)
+                        break
+
+                fila[f"{nombre_sonda} Velocidad"] = vel
+                fila[f"{nombre_sonda} Calidad R2"] = calidad
+                fila[f"{nombre_sonda} Calidad"] = texto_calidad
+
+                if vel is not None and not pd.isna(vel):
+                    velocidades.append(vel)
+
+            if velocidades:
+                media = np.mean(velocidades)
+                std = np.std(velocidades, ddof=1) if len(velocidades) > 1 else 0
+                cv = (std / media) * 100 if media != 0 else None
+            else:
+                media, std, cv = None, None, None
+
+            fila["Media velocidades"] = media
+            fila["Desviación estándar"] = std
+            fila["Coef Variación (%)"] = cv
+
+            # Todavía sin MPA
+            fila["Velocidad esperada"] = None
+            fila["Dif Real vs Esperada"] = None
+            fila["Dif absoluta"] = None
+
             medias_base = seg_base.get("medias", {})
-            
+
             if isinstance(medias_base, (dict, pd.Series)):
                 for k, v in dict(medias_base).items():
                     fila[k] = v
