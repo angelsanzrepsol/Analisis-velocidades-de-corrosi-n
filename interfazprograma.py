@@ -1046,7 +1046,7 @@ def procesar_crudos(df):
     ]
     comp_cols = sorted(comp_cols)
     porc_cols = sorted(porc_cols)
-    
+    st.write("COLUMNAS ARCHIVO CRUDOS:", list(df.columns))
     if not comp_cols or not porc_cols:
         raise ValueError("No se detectaron columnas COMP / PORCCOMP")
 
