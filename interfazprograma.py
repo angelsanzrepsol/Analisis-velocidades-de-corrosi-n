@@ -795,145 +795,143 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
     if not processed:
         return pd.DataFrame()
 
-    primera = list(processed.values())[0]
-    segmentos_base = primera["segmentos_validos"]
-
     filas = []
 
-    for i, seg_base in enumerate(segmentos_base, start=1):
+    # AGRUPAR POR REFINERÍA
+    refinerias_proc = {}
 
-        fila = {
-            "Segmento": f"Seg {i}",
-            "Inicio": seg_base.get("fecha_ini"),
-            "Fin": seg_base.get("fecha_fin")
-        }
+    for key, data in processed.items():
+        ref_id = data.get("refineria_id", "SIN_REFINERIA")
+        refinerias_proc.setdefault(ref_id, {})[key] = data
 
-        fi_ref = pd.to_datetime(seg_base["fecha_ini"])
-        ff_ref = pd.to_datetime(seg_base["fecha_fin"])
+    for ref_id, processed_ref in refinerias_proc.items():
 
-        velocidades = []
+        primera = list(processed_ref.values())[0]
+        segmentos_base = primera.get("segmentos_validos", [])
 
-        # =========================================
-        # COLUMNAS POR SONDA (Vel + Calidad)
-        # =========================================
+        for i, seg_base in enumerate(segmentos_base, start=1):
 
-        for key, data in processed.items():
+            fi_ref = pd.to_datetime(seg_base.get("fecha_ini"))
+            ff_ref = pd.to_datetime(seg_base.get("fecha_fin"))
 
-            nombre_sonda = f"{data['source_name']} | {data['hoja']}"
+            fila = {
+                "Refineria": primera.get("refineria_nombre", primera.get("source_name")),
+                "Segmento": f"Seg {i}",
+                "Inicio": fi_ref,
+                "Fin": ff_ref
+            }
 
-            vel = None
-            calidad = None
+            velocidades = []
+            vel_mpa_sondas = []
 
-            for seg in data["segmentos_validos"]:
+            for key, data in processed_ref.items():
 
-                fi = pd.to_datetime(seg["fecha_ini"])
-                ff = pd.to_datetime(seg["fecha_fin"])
+                nombre_sonda = f"{data['source_name']} | {data['hoja']}"
 
-                if fi == fi_ref and ff == ff_ref:
+                vel = None
+                calidad = None
+                texto_calidad = "Sin datos"
 
-                    vel = seg.get("vel_abs")
+                for seg in data.get("segmentos_validos", []):
 
-                    calidad = calcular_calidad_segmento(
-                        data["df_filtrado"],
-                        seg
-                    )
-                    texto_calidad = clasificar_calidad(calidad)
-                    break
+                    fi = pd.to_datetime(seg.get("fecha_ini"))
+                    ff = pd.to_datetime(seg.get("fecha_fin"))
 
-            fila[f"{nombre_sonda} Velocidad"] = vel
-            fila[f"{nombre_sonda} Calidad R2"] = calidad
-            fila[f"{nombre_sonda} Calidad"] = texto_calidad
-            fila["Días segmento"] = seg.get("delta_dias")
-            if vel is not None:
-                velocidades.append(vel)
+                    if fi == fi_ref and ff == ff_ref:
 
-        # =========================================
-        # ESTADÍSTICAS ENTRE SONDAS
-        # =========================================
+                        vel = seg.get("vel_abs")
 
-        if velocidades:
-            media = np.mean(velocidades)
-            std = np.std(velocidades, ddof=1) if len(velocidades) > 1 else 0
-            cv = (std / media) * 100 if media != 0 else None
-        else:
-            media, std, cv = None, None, None
-
-        fila["Media velocidades"] = media
-        fila["Desviación estándar"] = std
-        fila["Coef Variación (%)"] = cv
-
-        # =========================================
-        # VELOCIDAD ESPERADA MPA
-        # =========================================
-        
-        vel_mpa_sondas = []
-        
-        for key, data in processed.items():
-        
-            for seg in data["segmentos_validos"]:
-        
-                fi = pd.to_datetime(seg["fecha_ini"])
-                ff = pd.to_datetime(seg["fecha_fin"])
-        
-                if fi == fi_ref and ff == ff_ref:
-        
-                    medias_proc_sonda = seg.get("medias")
-        
-                    if df_mpa is not None and isinstance(medias_proc_sonda, (dict, pd.Series)):
-        
-                        md = dict(medias_proc_sonda)
-        
-                        temp = md.get("T", None)
-                        tan = md.get("TAN", None)
-                        
-                        if temp is None or pd.isna(temp):
-                            for k, v in md.items():
-                                if "temperatura" in str(k).lower() or "temperature" in str(k).lower() or "t salida" in str(k).lower():
-                                    temp = v
-                                    break
-                        
-                        if tan is None or pd.isna(tan):
-                            for k, v in md.items():
-                                if "tan" in str(k).lower() or "acidez" in str(k).lower() or "acid" in str(k).lower():
-                                    tan = v
-                                    break
-                        temp = pd.to_numeric(temp, errors="coerce")
-                        tan = pd.to_numeric(tan, errors="coerce")
-                        
-                        if pd.isna(temp) or pd.isna(tan):
-                            continue
-                        vel_mpa = buscar_velocidad_mas_cercana(
-                            df_mpa,
-                            temp,
-                            tan,
-                            material
+                        calidad = calcular_calidad_segmento(
+                            data["df_filtrado"],
+                            seg
                         )
-        
-                        if vel_mpa is not None and not pd.isna(vel_mpa):
-                            vel_mpa_sondas.append(vel_mpa)
-        
-                    break
-        
-        if vel_mpa_sondas:
-            vel_esperada = np.mean(vel_mpa_sondas)
-        else:
-            vel_esperada = None
-        
-        fila["Velocidad esperada"] = vel_esperada
 
-        if vel_esperada is not None and media is not None:
-            fila["Dif Real vs Esperada"] = media - vel_esperada
-            fila["Dif absoluta"] = abs(fila["Dif Real vs Esperada"])
-        medias_proc = seg_base.get("medias")
-        # =========================================
-        # VARIABLES PROCESO (una sola vez)
-        # =========================================
+                        texto_calidad = clasificar_calidad(calidad)
 
-        if isinstance(medias_proc, (dict, pd.Series)):
-            for k, v in dict(medias_proc).items():
-                fila[k] = v
+                        medias_proc = seg.get("medias", {})
 
-        filas.append(fila)
+                        if df_mpa is not None and isinstance(medias_proc, (dict, pd.Series)):
+
+                            md = dict(medias_proc)
+
+                            temp = md.get("T", None)
+                            tan = md.get("TAN", None)
+
+                            if temp is None or pd.isna(temp):
+                                for k2, v2 in md.items():
+                                    nombre = str(k2).lower()
+                                    if (
+                                        "temperatura" in nombre
+                                        or "temperature" in nombre
+                                        or "t salida" in nombre
+                                        or "entrada" in nombre
+                                    ):
+                                        temp = v2
+                                        break
+
+                            if tan is None or pd.isna(tan):
+                                for k2, v2 in md.items():
+                                    nombre = str(k2).lower()
+                                    if (
+                                        "tan" in nombre
+                                        or "acidez" in nombre
+                                        or "acid" in nombre
+                                    ):
+                                        tan = v2
+                                        break
+
+                            temp = pd.to_numeric(temp, errors="coerce")
+                            tan = pd.to_numeric(tan, errors="coerce")
+
+                            if not pd.isna(temp) and not pd.isna(tan):
+                                vel_mpa = buscar_velocidad_mas_cercana(
+                                    df_mpa,
+                                    temp,
+                                    tan,
+                                    material
+                                )
+
+                                if vel_mpa is not None and not pd.isna(vel_mpa):
+                                    vel_mpa_sondas.append(vel_mpa)
+
+                        break
+
+                fila[f"{nombre_sonda} Velocidad"] = vel
+                fila[f"{nombre_sonda} Calidad R2"] = calidad
+                fila[f"{nombre_sonda} Calidad"] = texto_calidad
+
+                if vel is not None and not pd.isna(vel):
+                    velocidades.append(vel)
+
+            if velocidades:
+                media = np.mean(velocidades)
+                std = np.std(velocidades, ddof=1) if len(velocidades) > 1 else 0
+                cv = (std / media) * 100 if media != 0 else None
+            else:
+                media, std, cv = None, None, None
+
+            if vel_mpa_sondas:
+                vel_esperada = np.mean(vel_mpa_sondas)
+            else:
+                vel_esperada = None
+
+            fila["Días segmento"] = seg_base.get("delta_dias")
+            fila["Media velocidades"] = media
+            fila["Desviación estándar"] = std
+            fila["Coef Variación (%)"] = cv
+            fila["Velocidad esperada"] = vel_esperada
+
+            if vel_esperada is not None and media is not None:
+                fila["Dif Real vs Esperada"] = media - vel_esperada
+                fila["Dif absoluta"] = abs(media - vel_esperada)
+
+            medias_base = seg_base.get("medias", {})
+
+            if isinstance(medias_base, (dict, pd.Series)):
+                for k, v in dict(medias_base).items():
+                    fila[k] = v
+
+            filas.append(fila)
 
     return pd.DataFrame(filas)
 
