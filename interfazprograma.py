@@ -3573,7 +3573,20 @@ with tabs[0]:
         # si tienes archivo de proceso subido, cargarlo (solo sheet 0)
         df_proc = ref_data.get("df_proc")
         vars_proceso = ref_data.get("vars_proceso", [])
+        uploaded_proc = ref_data.get("archivo_proceso")
+
+        if uploaded_proc is not None and ref_data.get("df_proc") is None:
+            try:
+                df_proc, vars_proceso = cargar_proceso_primera_hoja_limpio(uploaded_proc)
         
+                st.session_state["refinerias"][ref_id]["df_proc"] = df_proc
+                st.session_state["refinerias"][ref_id]["vars_proceso"] = vars_proceso
+        
+            except Exception as e:
+                st.error(f"Error cargando archivo de proceso para {ref_data['nombre']}: {e}")
+        
+        df_proc = st.session_state["refinerias"][ref_id].get("df_proc")
+        vars_proceso = st.session_state["refinerias"][ref_id].get("vars_proceso", [])
         if df_proc is not None:
             st.success("Archivo de proceso asignado a esta refinería listo para usar.")
         else:
