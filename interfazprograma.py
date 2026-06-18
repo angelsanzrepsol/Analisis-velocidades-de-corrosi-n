@@ -2809,20 +2809,47 @@ def obtener_cv_seguro(df):
     return pd.to_numeric(df["Coef Variación (%)"], errors="coerce")
 def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
 
-    if df_mpa is None or pd.isna(temp) or pd.isna(tan):
+    if df_mpa is None or df_mpa.empty:
+        return None
+
+    temp = pd.to_numeric(temp, errors="coerce")
+    tan = pd.to_numeric(tan, errors="coerce")
+
+    if pd.isna(temp) or pd.isna(tan):
         return None
 
     df_tmp = df_mpa.copy()
 
+    df_tmp["Temperature"] = pd.to_numeric(df_tmp["Temperature"], errors="coerce")
+    df_tmp["Acid Measurement"] = pd.to_numeric(df_tmp["Acid Measurement"], errors="coerce")
+
+    material_txt = str(material).lower()
+
+    if "5" in material_txt or "cr" in material_txt:
+        col_material = "5 Cr"
+    else:
+        col_material = "Carbon Steel"
+
+    if col_material not in df_tmp.columns:
+        return None
+
+    df_tmp[col_material] = pd.to_numeric(df_tmp[col_material], errors="coerce")
+
+    df_tmp = df_tmp.dropna(
+        subset=["Temperature", "Acid Measurement", col_material]
+    )
+
+    if df_tmp.empty:
+        return None
+
     df_tmp["dist"] = (
-        (df_tmp["Temperature"] - temp)**2 +
-        (df_tmp["Acid Measurement"] - tan)**2
+        (df_tmp["Temperature"] - temp) ** 2 +
+        (df_tmp["Acid Measurement"] - tan) ** 2
     )
 
     fila = df_tmp.loc[df_tmp["dist"].idxmin()]
 
-    return fila.get(material)
-
+    return fila[col_material]
 def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
 
     if df_comp is None or df_comp.empty:
