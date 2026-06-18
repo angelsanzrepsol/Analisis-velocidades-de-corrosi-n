@@ -3354,7 +3354,12 @@ for ref_id, ref_data in st.session_state["refinerias"].items():
     uploaded_proc = ref_data.get("archivo_proceso")
 
     if uploaded_proc is None:
+        st.session_state["refinerias"][ref_id]["df_proc"] = None
+        st.session_state["refinerias"][ref_id]["vars_proceso"] = []
+        st.sidebar.warning(f"Sin proceso asignado: {ref_data['nombre']}")
         continue
+    else:
+        st.sidebar.info(f"Proceso asignado a {ref_data['nombre']}: {uploaded_proc.name}")
     cargar_datos_proceso_fn = None
     try:
         # Guardar archivo subido temporalmente
@@ -3417,6 +3422,7 @@ for ref_id, ref_data in st.session_state["refinerias"].items():
 
         st.session_state["refinerias"][ref_id]["df_proc"] = df_proc
         st.session_state["refinerias"][ref_id]["vars_proceso"] = vars_proceso
+        st.session_state["refinerias"][ref_id]["archivo_proceso_nombre"] = uploaded_proc.name
         st.sidebar.success(f"Archivo de proceso cargado: {len(df_proc)} filas, {len(vars_proceso)} variables.")
     except Exception as e:
         st.sidebar.error(
@@ -3515,6 +3521,9 @@ with tabs[0]:
     vars_proceso = ref_data.get("vars_proceso", [])
 
     st.info(f"Refinería activa: {ref_data['nombre']}")
+    st.write("DEBUG archivo_proceso:", ref_data.get("archivo_proceso"))
+    st.write("DEBUG df_proc:", type(ref_data.get("df_proc")))
+    st.write("DEBUG vars_proceso:", ref_data.get("vars_proceso", [])[:5])
     # ============================================================
 # BLOQUE ÚNICO Y CORRECTO PARA LEER EL EXCEL DE CORROSIÓN
 # ============================================================
