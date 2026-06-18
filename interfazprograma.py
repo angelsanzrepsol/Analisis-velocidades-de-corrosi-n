@@ -865,25 +865,44 @@ def construir_tabla_segmentos_comparativa(processed_sheets, df_mpa, material):
         # =========================================
         # VELOCIDAD ESPERADA MPA
         # =========================================
-
-        vel_esperada = None
-
-        medias_proc = seg_base.get("medias")
-
-        if df_mpa is not None and isinstance(medias_proc, (dict, pd.Series)):
-
-            md = dict(medias_proc)
-
-            temp = md.get("T")
-            tan = md.get("TAN")
-
-            vel_esperada = buscar_velocidad_mas_cercana(
-                df_mpa,
-                temp,
-                tan,
-                material
-            )
-
+        
+        vel_mpa_sondas = []
+        
+        for key, data in processed.items():
+        
+            for seg in data["segmentos_validos"]:
+        
+                fi = pd.to_datetime(seg["fecha_ini"])
+                ff = pd.to_datetime(seg["fecha_fin"])
+        
+                if fi == fi_ref and ff == ff_ref:
+        
+                    medias_proc_sonda = seg.get("medias")
+        
+                    if df_mpa is not None and isinstance(medias_proc_sonda, (dict, pd.Series)):
+        
+                        md = dict(medias_proc_sonda)
+        
+                        temp = md.get("T")
+                        tan = md.get("TAN")
+        
+                        vel_mpa = buscar_velocidad_mas_cercana(
+                            df_mpa,
+                            temp,
+                            tan,
+                            material
+                        )
+        
+                        if vel_mpa is not None and not pd.isna(vel_mpa):
+                            vel_mpa_sondas.append(vel_mpa)
+        
+                    break
+        
+        if vel_mpa_sondas:
+            vel_esperada = np.mean(vel_mpa_sondas)
+        else:
+            vel_esperada = None
+        
         fila["Velocidad esperada"] = vel_esperada
 
         if vel_esperada is not None and media is not None:
