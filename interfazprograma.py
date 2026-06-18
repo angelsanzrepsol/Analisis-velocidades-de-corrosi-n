@@ -2581,15 +2581,10 @@ def cargar_propiedades_crudos(uploaded_file):
     # buscar columna especie (flexible)
     col_especie = None
     for c in df.columns:
-        if (
-            "espec" in c.lower()
-            or "crudo" in c.lower()
-            or "nombre" in c.lower()
-            or "componente" in c.lower()
-        ):
+        if "espec" in c.lower():
             col_especie = c
             break
-           
+
     if col_especie is None:
         raise ValueError("No se encontró columna de especie")
 
@@ -3404,7 +3399,7 @@ for ref_id, ref_data in st.session_state["refinerias"].items():
                 return np.nan
             
             # Aplicar limpieza a todas las celdas
-            df_proc = df_proc.map(limpiar_celda)
+            df_proc = df_proc.applymap(limpiar_celda)
             
             # Reemplazar strings vacíos o representaciones de NaN por NaN real
             df_proc = df_proc.replace(
