@@ -532,20 +532,268 @@ def entrenar_modelos_ml(df, vars_proceso=None, min_filas=3):
         else:
             imps = coefs
 
-        resultados["Ridge"] = {
-            "modelo": ridge,
+        resultados["Random Forest"] = {
+            "modelo": rf,
             "pred": pred_full,
             "r2": r2_score(y, pred_valid),
             "importancias": dict(
-                zip(X.columns, imps)
-            )
+                zip(X.columns, rf.feature_importances_)
+            ),
+            "features": list(X.columns),
+            "medianas": X.median(numeric_only=True).to_dict()
         }
 
     except Exception as e:
         st.error(f"Error ML Ridge: {e}")
 
     return resultados, y_full
+def obtener_columnas_modelo(modelo_data):
+    if modelo_data is None:
+        return []
 
+    if "features" in modelo_data:
+        return list(modelo_data["features"])
+
+    modelo = modelo_data.get("modelo")
+
+    if hasattr(modelo, "feature_names_in_"):
+        return list(modelo.feature_names_in_)
+
+    if "importancias" in modelo_data:
+        return list(modelo_data["importancias"].keys())
+
+    return []
+
+
+def preparar_X_estimacion(df_estimacion, modelo_data):
+    features = obtener_columnas_modelo(modelo_data)
+    medianas = modelo_data.get("medianas", {})
+
+    X = pd.DataFrame(index=df_estimacion.index)
+
+    for col in features:
+        if col in df_estimacion.columns:
+            X[col] = pd.to_numeric(df_estimacion[col], errors="coerce")
+        else:
+            X[col] = medianas.get(col, np.nan)
+
+        if X[col].isna().any():
+            X[col] = X[col].fillna(medianas.get(col, X[col].median()))
+
+        if X[col].isna().any():
+            X[col] = X[col].fillna(0)
+
+    return X
+
+
+def calcular_correlaciones_estimador(
+    df_base,
+    columnas,
+    target="Velocidad experimental"
+):
+    resultados = []
+
+    if df_base is None or df_base.empty:
+        return pd.DataFrame(columns=["Variable", "Correlacion", "Abs_correlacion"])
+
+    if target not in df_base.columns:
+        return pd.DataFrame(columns=["Variable", "Correlacion", "Abs_correlacion"])
+
+    y = pd.to_numeric(df_base[target], errors="coerce")
+
+    for col in columnas:
+        if col not in df_base.columns:
+            continue
+
+        x = pd.to_numeric(df_base[col], errors="coerce")
+        mask = x.notna() & y.notna()
+
+        if mask.sum() < 3:
+            continue
+
+        if x[mask].std() == 0:
+            continue
+
+        corr = np.corrcoef(x[mask], y[mask])[0, 1]
+
+        resultados.append({
+            "Variable": col,
+            "Correlacion": corr,
+            "Abs_correlacion": abs(corr)
+        })
+
+    if not resultados:
+        return pd.DataFrame(columns=["Variable", "Correlacion", "Abs_correlacion"])
+
+    return pd.DataFrame(resultados).sort_values(
+        "Abs_correlacion",
+        ascending=False
+    )
+
+
+def generar_tabla_estimaciones_velocidad(
+    df_base,
+    modelos,
+    df_mpa,
+    material,
+    col_temp,
+    col_tan,
+    temp_min,
+    temp_max,
+    temp_pasos,
+    tan_min,
+    tan_max,
+    tan_pasos
+):
+    if df_base is None or df_base.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    if not modelos:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    df_base = df_base.copy()
+
+    features_union = []
+
+    for _, modelo_data in modelos.items():
+        for col in obtener_columnas_modelo(modelo_data):
+            if col not in features_union:
+                features_union.append(col)
+
+    if not features_union:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    base = {}
+
+    for col in features_union:
+        if col in df_base.columns:
+            serie = pd.to_numeric(df_base[col], errors="coerce")
+            base[col] = serie.median()
+        else:
+            base[col] = np.nan
+
+    temps = np.linspace(float(temp_min), float(temp_max), int(temp_pasos))
+    tans = np.linspace(float(tan_min), float(tan_max), int(tan_pasos))
+
+    filas = []
+
+    for temp in temps:
+        for tan in tans:
+            fila = {
+                "Temperatura_iterada": temp,
+                "TAN_iterado": tan,
+                "Material": material
+            }
+
+            for col, val in base.items():
+                fila[col] = val
+
+            fila[col_temp] = temp
+            fila[col_tan] = tan
+
+            filas.append(fila)
+
+    df_estim = pd.DataFrame(filas)
+
+    columnas_pred_ml = []
+
+    for nombre_modelo, modelo_data in modelos.items():
+        modelo = modelo_data.get("modelo")
+
+        if modelo is None:
+            continue
+
+        try:
+            X_pred = preparar_X_estimacion(df_estim, modelo_data)
+            pred = modelo.predict(X_pred)
+
+            col_pred = f"Velocidad ML - {nombre_modelo}"
+            df_estim[col_pred] = pred
+            columnas_pred_ml.append(col_pred)
+
+        except Exception as e:
+            df_estim[f"Error ML - {nombre_modelo}"] = str(e)
+
+    if columnas_pred_ml:
+        df_estim["Velocidad ML media"] = df_estim[columnas_pred_ml].mean(axis=1)
+
+    if df_mpa is not None and not df_mpa.empty:
+        df_estim["Velocidad MPA"] = df_estim.apply(
+            lambda row: buscar_velocidad_mas_cercana(
+                df_mpa,
+                row["Temperatura_iterada"],
+                row["TAN_iterado"],
+                material
+            ),
+            axis=1
+        )
+    else:
+        df_estim["Velocidad MPA"] = np.nan
+
+    if "Velocidad ML media" in df_estim.columns:
+        df_estim["Diferencia ML media vs MPA"] = (
+            df_estim["Velocidad ML media"] - df_estim["Velocidad MPA"]
+        )
+
+    filas_importancias = []
+
+    for nombre_modelo, modelo_data in modelos.items():
+        importancias = modelo_data.get("importancias", {})
+
+        for var, imp in importancias.items():
+            filas_importancias.append({
+                "Modelo": nombre_modelo,
+                "Variable": var,
+                "Importancia": imp
+            })
+
+    df_importancias = pd.DataFrame(filas_importancias)
+
+    df_correlaciones = calcular_correlaciones_estimador(
+        df_base,
+        features_union,
+        target="Velocidad experimental"
+    )
+
+    return df_estim, df_importancias, df_correlaciones
+
+
+def crear_excel_estimaciones_teoricas(
+    df_estim,
+    df_importancias,
+    df_correlaciones,
+    config
+):
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df_estim.to_excel(
+            writer,
+            index=False,
+            sheet_name="Estimaciones"
+        )
+
+        df_importancias.to_excel(
+            writer,
+            index=False,
+            sheet_name="Importancias ML"
+        )
+
+        df_correlaciones.to_excel(
+            writer,
+            index=False,
+            sheet_name="Correlaciones"
+        )
+
+        pd.DataFrame([config]).to_excel(
+            writer,
+            index=False,
+            sheet_name="Configuracion"
+        )
+
+    output.seek(0)
+
+    return output
 def clasificar_por_tolerancia(y_real, y_pred, tol):
 
     df = pd.DataFrame({
@@ -6599,6 +6847,251 @@ with tabs[4]:
         )
     
         st.plotly_chart(fig_best, use_container_width=True, key="mejor_modelo")
+        # =====================================================
+        # GENERADOR TEÓRICO DE VELOCIDADES ML + MPA
+        # =====================================================
+        
+        st.markdown("---")
+        st.subheader("Generador teórico de velocidades ML / MPA")
+        
+        st.caption(
+            "Genera una tabla de estimaciones variando TAN y temperatura. "
+            "El resto de variables del modelo se mantienen en el valor mediano "
+            "de la refinería seleccionada."
+        )
+        
+        df_base_estimador = df_comp.copy()
+        
+        if "Velocidad experimental" not in df_base_estimador.columns:
+            df_base_estimador["Velocidad experimental"] = df_base_estimador["Media velocidades"]
+        
+        cols_numericas_estimador = []
+        
+        for c in df_base_estimador.columns:
+            serie_num = pd.to_numeric(
+                df_base_estimador[c],
+                errors="coerce"
+            )
+        
+            if serie_num.notna().sum() > 0:
+                cols_numericas_estimador.append(c)
+        
+        if not cols_numericas_estimador:
+            st.warning("No hay columnas numéricas para generar estimaciones teóricas.")
+        
+        else:
+            col_temp_default = st.session_state.get(
+                "mpa_col_temp_tabla_comparativa",
+                None
+            )
+        
+            col_tan_default = st.session_state.get(
+                "mpa_col_tan_tabla_comparativa",
+                None
+            )
+        
+            def indice_default_estimador(cols, col_guardada, palabras):
+                if col_guardada in cols:
+                    return cols.index(col_guardada)
+        
+                for i, col in enumerate(cols):
+                    cl = str(col).lower()
+                    if any(p in cl for p in palabras):
+                        return i
+        
+                return 0
+        
+            idx_temp_estimador = indice_default_estimador(
+                cols_numericas_estimador,
+                col_temp_default,
+                [
+                    "temperatura",
+                    "temperature",
+                    "temp",
+                    "t salida",
+                    "t entrada",
+                    "entrada",
+                    "salida",
+                    "t"
+                ]
+            )
+        
+            idx_tan_estimador = indice_default_estimador(
+                cols_numericas_estimador,
+                col_tan_default,
+                [
+                    "tan",
+                    "acidez",
+                    "acid",
+                    "aci"
+                ]
+            )
+        
+            col_temp_estimador = st.selectbox(
+                "Variable de TEMPERATURA para iterar",
+                cols_numericas_estimador,
+                index=idx_temp_estimador,
+                key="estimador_col_temp"
+            )
+        
+            col_tan_estimador = st.selectbox(
+                "Variable de TAN / acidez para iterar",
+                cols_numericas_estimador,
+                index=idx_tan_estimador,
+                key="estimador_col_tan"
+            )
+        
+            features_usadas = []
+        
+            for _, modelo_data in modelos.items():
+                for f in obtener_columnas_modelo(modelo_data):
+                    if f not in features_usadas:
+                        features_usadas.append(f)
+        
+            if col_temp_estimador not in features_usadas:
+                st.warning(
+                    "La columna de temperatura seleccionada no está entre las variables usadas por el ML. "
+                    "Al variarla, cambiará MPA, pero puede no cambiar la predicción ML."
+                )
+        
+            if col_tan_estimador not in features_usadas:
+                st.warning(
+                    "La columna TAN/acidez seleccionada no está entre las variables usadas por el ML. "
+                    "Al variarla, cambiará MPA, pero puede no cambiar la predicción ML."
+                )
+        
+            col1, col2, col3 = st.columns(3)
+        
+            temp_serie = pd.to_numeric(
+                df_base_estimador[col_temp_estimador],
+                errors="coerce"
+            ).dropna()
+        
+            tan_serie = pd.to_numeric(
+                df_base_estimador[col_tan_estimador],
+                errors="coerce"
+            ).dropna()
+        
+            if temp_serie.empty or tan_serie.empty:
+                st.warning(
+                    "La columna de temperatura o TAN seleccionada no tiene valores numéricos."
+                )
+        
+            else:
+                with col1:
+                    temp_min = st.number_input(
+                        "Temperatura mínima",
+                        value=float(temp_serie.min()),
+                        key="estimador_temp_min"
+                    )
+        
+                    temp_max = st.number_input(
+                        "Temperatura máxima",
+                        value=float(temp_serie.max()),
+                        key="estimador_temp_max"
+                    )
+        
+                with col2:
+                    tan_min = st.number_input(
+                        "TAN/acidez mínimo",
+                        value=float(tan_serie.min()),
+                        key="estimador_tan_min"
+                    )
+        
+                    tan_max = st.number_input(
+                        "TAN/acidez máximo",
+                        value=float(tan_serie.max()),
+                        key="estimador_tan_max"
+                    )
+        
+                with col3:
+                    temp_pasos = st.number_input(
+                        "Pasos temperatura",
+                        min_value=2,
+                        max_value=200,
+                        value=20,
+                        step=1,
+                        key="estimador_temp_pasos"
+                    )
+        
+                    tan_pasos = st.number_input(
+                        "Pasos TAN/acidez",
+                        min_value=2,
+                        max_value=200,
+                        value=20,
+                        step=1,
+                        key="estimador_tan_pasos"
+                    )
+        
+                st.caption(
+                    f"Se generarán aproximadamente {int(temp_pasos) * int(tan_pasos)} combinaciones."
+                )
+        
+                if st.button(
+                    "Generar Excel de estimaciones teóricas",
+                    key="btn_generar_estimaciones_teoricas"
+                ):
+                    if temp_min > temp_max:
+                        st.error("La temperatura mínima no puede ser mayor que la máxima.")
+        
+                    elif tan_min > tan_max:
+                        st.error("El TAN mínimo no puede ser mayor que el máximo.")
+        
+                    else:
+                        df_estim, df_importancias, df_correlaciones = generar_tabla_estimaciones_velocidad(
+                            df_base=df_base_estimador,
+                            modelos=modelos,
+                            df_mpa=st.session_state.get("df_mpa"),
+                            material=material_sel,
+                            col_temp=col_temp_estimador,
+                            col_tan=col_tan_estimador,
+                            temp_min=temp_min,
+                            temp_max=temp_max,
+                            temp_pasos=temp_pasos,
+                            tan_min=tan_min,
+                            tan_max=tan_max,
+                            tan_pasos=tan_pasos
+                        )
+        
+                        if df_estim.empty:
+                            st.warning("No se ha podido generar la tabla de estimaciones.")
+        
+                        else:
+                            st.success(
+                                f"Tabla generada con {len(df_estim)} combinaciones."
+                            )
+        
+                            st.dataframe(df_estim.head(100))
+        
+                            config_estimador = {
+                                "Refineria": ref_data_modelo.get("nombre", ref_id_modelo_activo)
+                                if "ref_data_modelo" in locals()
+                                else "",
+                                "Material": material_sel,
+                                "Columna temperatura": col_temp_estimador,
+                                "Columna TAN": col_tan_estimador,
+                                "Temp min": temp_min,
+                                "Temp max": temp_max,
+                                "Temp pasos": temp_pasos,
+                                "TAN min": tan_min,
+                                "TAN max": tan_max,
+                                "TAN pasos": tan_pasos,
+                                "Modelos": ", ".join(modelos.keys())
+                            }
+        
+                            excel_estimaciones = crear_excel_estimaciones_teoricas(
+                                df_estim,
+                                df_importancias,
+                                df_correlaciones,
+                                config_estimador
+                            )
+        
+                            st.download_button(
+                                "Descargar Excel de estimaciones teóricas",
+                                data=excel_estimaciones,
+                                file_name=f"estimaciones_teoricas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            ) 
         # IMPORTANCIA MPA
         imp_mpa = importancia_mpa(df_comp)
         
