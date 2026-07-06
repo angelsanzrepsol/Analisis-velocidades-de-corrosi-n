@@ -6,7 +6,9 @@ import pickle
 import io
 import tempfile
 from datetime import datetime
-
+import numpy as np
+import pandas as pd
+from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -23,6 +25,53 @@ import io
 import re
 
 import json
+def convertir_numero_mpa(serie):
+    return pd.to_numeric(
+        serie
+        .astype(str)
+        .str.replace(",", ".", regex=False)
+        .str.extract(r"([-+]?\d*\.?\d+)", expand=False),
+        errors="coerce"
+    )
+
+
+def crear_interpolador_mpa(df_mpa, col_temp_mpa, col_tan_mpa, col_vel_mpa):
+    df = df_mpa[[col_temp_mpa, col_tan_mpa, col_vel_mpa]].copy()
+
+    df[col_temp_mpa] = convertir_numero_mpa(df[col_temp_mpa])
+    df[col_tan_mpa] = convertir_numero_mpa(df[col_tan_mpa])
+    df[col_vel_mpa] = convertir_numero_mpa(df[col_vel_mpa])
+
+    df = df.dropna(subset=[col_temp_mpa, col_tan_mpa, col_vel_mpa])
+
+    if df.empty:
+        return None, None
+
+    puntos = df[[col_temp_mpa, col_tan_mpa]].to_numpy()
+    valores = df[col_vel_mpa].to_numpy()
+
+    interpolador_lineal = LinearNDInterpolator(puntos, valores)
+    interpolador_cercano = NearestNDInterpolator(puntos, valores)
+
+    return interpolador_lineal, interpolador_cercano
+
+
+def calcular_velocidad_mpa(temp, tan, interpolador_lineal, interpolador_cercano):
+    if pd.isna(temp) or pd.isna(tan):
+        return np.nan
+
+    valor = interpolador_lineal(temp, tan)
+
+    try:
+        valor = float(valor)
+    except Exception:
+        valor = np.nan
+
+    if pd.isna(valor):
+        valor = float(interpolador_cercano(temp, tan))
+
+    return valor
+
 def construir_dataset_modelo_cestas(
     df_cestas,
     detalle_crudos=None,
@@ -2687,7 +2736,39 @@ if uploaded_mpa is not None:
             + (f" · hoja: {hoja_mpa}" if hoja_mpa else "")
             + (f" · materiales: {', '.join(cols_material)}" if cols_material else "")
         )
+        st.subheader("Configuración curva MPA")
 
+        columnas_mpa = list(df_mpa.columns)
+        
+        col_temp_mpa = st.selectbox(
+            "MPA: columna de temperatura",
+            columnas_mpa,
+            key="col_temp_mpa"
+        )
+        
+        col_tan_mpa = st.selectbox(
+            "MPA: columna de TAN / acidez",
+            columnas_mpa,
+            key="col_tan_mpa"
+        )
+        
+        col_vel_mpa = st.selectbox(
+            "MPA: columna de velocidad teórica",
+            columnas_mpa,
+            key="col_vel_mpa"
+        )
+        
+        st.write("Columnas MPA seleccionadas:")
+        st.write("Temperatura MPA:", col_temp_mpa)
+        st.write("TAN MPA:", col_tan_mpa)
+        st.write("Velocidad MPA:", col_vel_mpa)
+        
+        interpolador_lineal_mpa, interpolador_cercano_mpa = crear_interpolador_mpa(
+            df_mpa,
+            col_temp_mpa,
+            col_tan_mpa,
+            col_vel_mpa
+        )
     except Exception as e:
         st.session_state.pop("df_mpa", None)
         st.sidebar.error(f"Error leyendo MPA: {e}")
@@ -3902,12 +3983,99 @@ for ref_id, ref_data in st.session_state["refinerias"].items():
                 df_proc[c] = pd.to_numeric(df_proc[c], errors="coerce")
 
         vars_proceso = [c for c in df_proc.columns if c != "Fecha"]
-
+        
+        # =====================================================
+        # SELECCIÓN MANUAL DE COLUMNAS T Y TAN PARA MPA
+        # =====================================================
+        
+        cols_num_proceso = [
+            c for c in vars_proceso
+            if pd.api.types.is_numeric_dtype(df_proc[c])
+        ]
+        
+        def _buscar_indice_columna(opciones, palabras):
+            for i, c in enumerate(opciones):
+                cl = str(c).lower()
+                if any(p in cl for p in palabras):
+                    return i
+            return 0
+        
+        if cols_num_proceso:
+        
+            idx_temp = _buscar_indice_columna(
+                cols_num_proceso,
+                [
+                    "temperatura",
+                    "temperature",
+                    "temp",
+                    "t salida",
+                    "t entrada",
+                    "entrada",
+                    "salida",
+                    "temp."
+                ]
+            )
+        
+            idx_tan = _buscar_indice_columna(
+                cols_num_proceso,
+                [
+                    "tan",
+                    "acidez",
+                    "acid",
+                    "aci"
+                ]
+            )
+        
+            st.sidebar.markdown("---")
+            st.sidebar.subheader(f"MPA proceso: {ref_data['nombre']}")
+        
+            col_temp_mpa_proc = st.sidebar.selectbox(
+                "Columna TEMPERATURA para MPA",
+                cols_num_proceso,
+                index=idx_temp,
+                key=f"mpa_temp_proc_{ref_id}"
+            )
+        
+            col_tan_mpa_proc = st.sidebar.selectbox(
+                "Columna TAN / acidez para MPA",
+                cols_num_proceso,
+                index=idx_tan,
+                key=f"mpa_tan_proc_{ref_id}"
+            )
+        
+            # Crear alias que ya usa tu código MPA
+            df_proc["T"] = pd.to_numeric(
+                df_proc[col_temp_mpa_proc],
+                errors="coerce"
+            )
+        
+            df_proc["TAN"] = pd.to_numeric(
+                df_proc[col_tan_mpa_proc],
+                errors="coerce"
+            )
+        
+            vars_proceso = [c for c in df_proc.columns if c != "Fecha"]
+        
+            st.session_state["refinerias"][ref_id]["col_temp_mpa_proc"] = col_temp_mpa_proc
+            st.session_state["refinerias"][ref_id]["col_tan_mpa_proc"] = col_tan_mpa_proc
+        
+            st.sidebar.caption(
+                f"MPA usará T = {col_temp_mpa_proc} | TAN = {col_tan_mpa_proc}"
+            )
+        
+        else:
+            st.sidebar.warning(
+                f"El archivo de proceso de {ref_data['nombre']} no tiene columnas numéricas para MPA."
+            )
+        
         st.session_state["refinerias"][ref_id]["df_proc"] = df_proc
         st.session_state["refinerias"][ref_id]["vars_proceso"] = vars_proceso
         st.session_state["vars_proceso"] = vars_proceso
         st.session_state["refinerias"][ref_id]["archivo_proceso_nombre"] = uploaded_proc.name
-        st.sidebar.success(f"Archivo de proceso cargado: {len(df_proc)} filas, {len(vars_proceso)} variables.")
+        
+        st.sidebar.success(
+            f"Archivo de proceso cargado: {len(df_proc)} filas, {len(vars_proceso)} variables."
+        )
     except Exception as e:
         st.sidebar.error(
             f"Error leyendo proceso para {ref_data['nombre']}: {e}"
