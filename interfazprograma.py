@@ -328,77 +328,175 @@ def dividir_todos_segmentos(
     return sorted(nuevos, key=lambda x: x["fecha_ini"])
 
 import plotly.graph_objects as go
-def entrenar_modelos_ml(df, vars_proceso):
+def entrenar_modelos_ml(df, vars_proceso=None, min_filas=3):
+    """
+    Entrenamiento ML robusto:
+    - Usa variables numéricas disponibles en df.
+    - No elimina una fila porque una sola variable tenga NaN.
+    - Rellena NaN con la mediana de cada variable.
+    - Elimina variables vacías o constantes.
+    - Permite entrenar desde 3 filas válidas.
+    """
 
     from sklearn.ensemble import RandomForestRegressor
+    from sklearn.linear_model import Ridge
     from sklearn.metrics import r2_score
 
     resultados = {}
 
-    df = df.copy().reset_index(drop=True)
-
-    # variables válidas
-    vars_validas = [
-        v for v in vars_proceso
-        if v in df.columns
-    ]
-
-    if not vars_validas:
+    if df is None or df.empty:
         return {}, pd.Series(dtype=float)
 
-    # =====================================================
-    # DATOS COMPLETOS
-    # =====================================================
+    df = df.copy().reset_index(drop=True)
 
-    X_full = df[vars_validas].apply(
-        pd.to_numeric,
-        errors="coerce"
-    )
+    if "Velocidad experimental" not in df.columns:
+        if "Media velocidades" in df.columns:
+            df["Velocidad experimental"] = df["Media velocidades"]
+        elif "Velocidad" in df.columns:
+            df["Velocidad experimental"] = df["Velocidad"]
+        elif "Velocidad_corr" in df.columns:
+            df["Velocidad experimental"] = df["Velocidad_corr"]
+        else:
+            st.warning("ML: no se encontró columna objetivo de velocidad.")
+            return {}, pd.Series(dtype=float)
 
     y_full = pd.to_numeric(
         df["Velocidad experimental"],
         errors="coerce"
     )
 
-    # =====================================================
-    # FILAS VÁLIDAS
-    # =====================================================
+    columnas_excluir = {
+        "Refineria",
+        "Segmento",
+        "Inicio",
+        "Fin",
+        "Días segmento",
+        "Media velocidades",
+        "Desviación estándar",
+        "Coef Variación (%)",
+        "Velocidad esperada",
+        "Velocidad teórica",
+        "Velocidad teórica MPA",
+        "Velocidad experimental",
+        "Dif Real vs Esperada",
+        "Dif absoluta",
+        "MPA material",
+        "estado_diag",
+        "delta_diag",
+        "Fecha",
+        "Fecha_ini",
+        "Fecha_fin",
+        "Fecha_inicio",
+        "Fecha_final",
+        "Sonda",
+        "Hoja",
+        "Crudo",
+        "Especies",
+        "Estado",
+        "Calidad",
+        "Calidad R2"
+    }
 
-    mask = (
-        ~X_full.isna().any(axis=1)
-    ) & (
-        ~y_full.isna()
-    )
+    vars_proceso = vars_proceso or []
 
-    X = X_full.loc[mask]
-    y = y_full.loc[mask]
+    candidatas = [
+        c for c in vars_proceso
+        if c in df.columns and c not in columnas_excluir
+    ]
 
-    if len(X) < 10:
+    if not candidatas:
+        candidatas = [
+            c for c in df.columns
+            if c not in columnas_excluir
+        ]
+
+    if not candidatas:
+        st.warning("ML: no hay variables candidatas para entrenar.")
         return {}, y_full
 
-    # =====================================================
-    # RANDOM FOREST
-    # =====================================================
+    X_full = df[candidatas].apply(
+        pd.to_numeric,
+        errors="coerce"
+    )
+
+    columnas_buenas = []
+
+    for c in X_full.columns:
+        serie = X_full[c]
+
+        if serie.notna().sum() < min_filas:
+            continue
+
+        if serie.nunique(dropna=True) <= 1:
+            continue
+
+        columnas_buenas.append(c)
+
+    if not columnas_buenas:
+        st.warning(
+            "ML: hay columnas, pero ninguna tiene suficientes datos numéricos "
+            "o todas son constantes."
+        )
+        return {}, y_full
+
+    X_full = X_full[columnas_buenas]
+
+    medianas = X_full.median(numeric_only=True)
+    X_full = X_full.fillna(medianas)
+
+    X_full = X_full.dropna(axis=1, how="any")
+
+    if X_full.empty:
+        st.warning("ML: las variables quedaron vacías después de limpiar NaN.")
+        return {}, y_full
+
+    mask = y_full.notna()
+    X = X_full.loc[mask].copy()
+    y = y_full.loc[mask].copy()
+
+    X = X.replace([np.inf, -np.inf], np.nan)
+    X = X.fillna(X.median(numeric_only=True))
+
+    mask_final = ~X.isna().any(axis=1)
+    X = X.loc[mask_final]
+    y = y.loc[mask_final]
+
+    if len(X) < min_filas:
+        st.warning(
+            f"ML: solo hay {len(X)} filas válidas. "
+            f"Se necesitan al menos {min_filas}."
+        )
+        return {}, y_full
+
+    if y.nunique(dropna=True) <= 1:
+        st.warning(
+            "ML: la velocidad experimental no varía. "
+            "No se puede entrenar un modelo útil."
+        )
+        return {}, y_full
+
+    st.caption(
+        f"ML entrenando con {len(X)} filas y {len(X.columns)} variables."
+    )
 
     try:
-
         rf = RandomForestRegressor(
             n_estimators=300,
-            random_state=42
+            random_state=42,
+            min_samples_leaf=1
         )
 
         rf.fit(X, y)
 
-        # 🔥 predicción SOLO válidos
         pred_valid = rf.predict(X)
 
-        # 🔥 reconstruir tamaño ORIGINAL
         pred_full = pd.Series(
             [np.nan] * len(df),
-            index=df.index
+            index=df.index,
+            dtype=float
         )
 
-        pred_full.loc[mask] = pred_valid
+        pred_full.loc[X.index] = pred_valid
 
         resultados["Random Forest"] = {
             "modelo": rf,
@@ -410,8 +508,41 @@ def entrenar_modelos_ml(df, vars_proceso):
         }
 
     except Exception as e:
+        st.error(f"Error ML Random Forest: {e}")
 
-        st.error(f"Error ML: {e}")
+    try:
+        ridge = Ridge(alpha=1.0)
+
+        ridge.fit(X, y)
+
+        pred_valid = ridge.predict(X)
+
+        pred_full = pd.Series(
+            [np.nan] * len(df),
+            index=df.index,
+            dtype=float
+        )
+
+        pred_full.loc[X.index] = pred_valid
+
+        coefs = np.abs(ridge.coef_)
+
+        if coefs.sum() > 0:
+            imps = coefs / coefs.sum()
+        else:
+            imps = coefs
+
+        resultados["Ridge"] = {
+            "modelo": ridge,
+            "pred": pred_full,
+            "r2": r2_score(y, pred_valid),
+            "importancias": dict(
+                zip(X.columns, imps)
+            )
+        }
+
+    except Exception as e:
+        st.error(f"Error ML Ridge: {e}")
 
     return resultados, y_full
 
