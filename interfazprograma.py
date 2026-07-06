@@ -3207,32 +3207,30 @@ def obtener_cv_seguro(df):
 
     return pd.to_numeric(df["Coef Variación (%)"], errors="coerce")
 def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
+    """
+    Interpola la curva MPA usando:
+        Temperature + Acid Measurement -> Carbon Steel / 5 Cr
+
+    Si el punto queda fuera de la zona interpolable, usa el punto más cercano
+    como respaldo.
+    """
 
     if df_mpa is None or df_mpa.empty:
         return None
 
-    temp = pd.to_numeric(temp, errors="coerce")
-    tan = pd.to_numeric(tan, errors="coerce")
+    temp = pd.to_numeric(pd.Series([temp]), errors="coerce").iloc[0]
+    tan = pd.to_numeric(pd.Series([tan]), errors="coerce").iloc[0]
 
     if pd.isna(temp) or pd.isna(tan):
         return None
 
     df_tmp = df_mpa.copy()
 
-    columnas_base = ["Temperature", "Acid Measurement"]
+    col_temp = "Temperature"
+    col_tan = "Acid Measurement"
 
-    if not set(columnas_base).issubset(df_tmp.columns):
+    if col_temp not in df_tmp.columns or col_tan not in df_tmp.columns:
         return None
-
-    df_tmp["Temperature"] = pd.to_numeric(
-        df_tmp["Temperature"],
-        errors="coerce"
-    )
-
-    df_tmp["Acid Measurement"] = pd.to_numeric(
-        df_tmp["Acid Measurement"],
-        errors="coerce"
-    )
 
     material_txt = str(material).lower()
 
@@ -3241,52 +3239,96 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
     else:
         col_material = "Carbon Steel"
 
-    # Si el usuario pide un material que no existe,
-    # usar el otro si está disponible.
     if col_material not in df_tmp.columns:
-        alternativas = [
-            c for c in ["Carbon Steel", "5 Cr"]
-            if c in df_tmp.columns
-        ]
+        return None
 
-        if not alternativas:
-            return None
+    df_tmp[col_temp] = convertir_numero_mpa(df_tmp[col_temp])
+    df_tmp[col_tan] = convertir_numero_mpa(df_tmp[col_tan])
+    df_tmp[col_material] = convertir_numero_mpa(df_tmp[col_material])
 
-        col_material = alternativas[0]
-
-    df_tmp[col_material] = pd.to_numeric(
-        df_tmp[col_material],
-        errors="coerce"
-    )
-
-    df_tmp = df_tmp.dropna(
-        subset=["Temperature", "Acid Measurement", col_material]
-    )
+    df_tmp = df_tmp.dropna(subset=[col_temp, col_tan, col_material])
 
     if df_tmp.empty:
         return None
 
-    # Distancia normalizada:
-    # evita que la temperatura pese muchísimo más que el TAN.
-    rango_temp = df_tmp["Temperature"].max() - df_tmp["Temperature"].min()
-    rango_tan = df_tmp["Acid Measurement"].max() - df_tmp["Acid Measurement"].min()
+    puntos = df_tmp[[col_temp, col_tan]].to_numpy(dtype=float)
+    valores = df_tmp[col_material].to_numpy(dtype=float)
 
-    if pd.isna(rango_temp) or rango_temp == 0:
-        rango_temp = 1.0
+    valor = np.nan
 
-    if pd.isna(rango_tan) or rango_tan == 0:
-        rango_tan = 1.0
+    if len(df_tmp) >= 3:
+        try:
+            interpolador_lineal = LinearNDInterpolator(puntos, valores)
+            valor = interpolador_lineal(float(temp), float(tan))
+            valor = float(valor)
+        except Exception:
+            valor = np.nan
 
-    df_tmp["dist"] = (
-        ((df_tmp["Temperature"] - temp) / rango_temp) ** 2
-        +
-        ((df_tmp["Acid Measurement"] - tan) / rango_tan) ** 2
+    if pd.isna(valor):
+        try:
+            interpolador_cercano = NearestNDInterpolator(puntos, valores)
+            valor = float(interpolador_cercano(float(temp), float(tan)))
+        except Exception:
+            return None
+
+    return valor
+
+
+def aplicar_mpa_desde_tabla_comparativa(df_comp, df_mpa, material, col_temp_tabla, col_tan_tabla):
+    """
+    Calcula la velocidad MPA usando las columnas YA EXISTENTES de la tabla comparativa.
+    df_comp[col_temp_tabla] -> Temperature de MPA
+    df_comp[col_tan_tabla]  -> Acid Measurement de MPA
+    material                -> Carbon Steel / 5 Cr
+    """
+
+    if df_comp is None or df_comp.empty:
+        return df_comp
+
+    df = df_comp.copy()
+
+    if df_mpa is None or df_mpa.empty:
+        df["Velocidad esperada"] = np.nan
+        df["Velocidad teórica MPA"] = np.nan
+        return df
+
+    if col_temp_tabla not in df.columns or col_tan_tabla not in df.columns:
+        df["Velocidad esperada"] = np.nan
+        df["Velocidad teórica MPA"] = np.nan
+        return df
+
+    df["MPA T usada"] = convertir_numero_mpa(df[col_temp_tabla])
+    df["MPA TAN usado"] = convertir_numero_mpa(df[col_tan_tabla])
+    df["MPA material"] = material
+
+    df["Velocidad esperada"] = df.apply(
+        lambda row: buscar_velocidad_mas_cercana(
+            df_mpa,
+            row["MPA T usada"],
+            row["MPA TAN usado"],
+            material
+        ),
+        axis=1
     )
 
-    fila = df_tmp.loc[df_tmp["dist"].idxmin()]
+    df["Velocidad teórica MPA"] = df["Velocidad esperada"]
 
-    return fila[col_material]
+    if "Media velocidades" in df.columns:
+        media_num = pd.to_numeric(df["Media velocidades"], errors="coerce")
+        vel_num = pd.to_numeric(df["Velocidad esperada"], errors="coerce")
 
+        df["Dif Real vs Esperada"] = media_num - vel_num
+        df["Dif absoluta"] = (media_num - vel_num).abs()
+
+    return df
+
+
+def indice_columna_sugerida_mpa(columnas, palabras):
+    for i, col in enumerate(columnas):
+        col_limpia = str(col).lower()
+        if any(p in col_limpia for p in palabras):
+            return i
+    return 0
 def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
 
     if df_comp is None or df_comp.empty:
@@ -4804,101 +4846,133 @@ with tabs[2]:
         material_sel
     )
     if df_comp is not None and not df_comp.empty:
-     
-     # Alias visible para que la velocidad MPA aparezca claramente en esta pestaña
-     df_comp["Velocidad teórica MPA"] = df_comp.get(
-         "Velocidad esperada",
-         np.nan
-     )
-     
-     columnas_prioritarias = [
-         "Refineria",
-         "Segmento",
-         "Inicio",
-         "Fin",
-         "Media velocidades",
-         "Velocidad teórica MPA",
-         "MPA T usada",
-         "MPA TAN usado",
-         "MPA material",
-         "Dif Real vs Esperada",
-         "Dif absoluta"
-     ]
-     
-     columnas_prioritarias = [
-         c for c in columnas_prioritarias
-         if c in df_comp.columns
-     ]
-     
-     otras_columnas = [
-         c for c in df_comp.columns
-         if c not in columnas_prioritarias
-     ]
-     
-     df_comp = df_comp[columnas_prioritarias + otras_columnas]
-     
-     n_teoricas = pd.to_numeric(
-         df_comp["Velocidad teórica MPA"],
-         errors="coerce"
-     ).notna().sum()
-     
-     if st.session_state.get("df_mpa") is None:
-         st.warning(
-             "No hay curva MPA cargada. Sube el Excel MPA para calcular la velocidad teórica."
-         )
-     
-     elif n_teoricas == 0:
-         st.subheader("DEBUG cálculo velocidad teórica")
-        
-         _vars = dict(locals())
-        
-         st.write("DataFrames disponibles en este punto:")
-        
-         dfs_disponibles = []
-        
-         for nombre, valor in list(_vars.items()):
-            if isinstance(valor, pd.DataFrame):
-                dfs_disponibles.append(nombre)
-        
-         st.write(dfs_disponibles)
-        
-         df_debug = None
-         nombre_df_debug = None
-        
-         for nombre in dfs_disponibles:
-            valor = _vars[nombre]
-        
-            columnas_texto = " ".join([str(c).lower() for c in valor.columns])
-        
-            if (
-                "tan" in columnas_texto
-                or "aci" in columnas_texto
-                or "temp" in columnas_texto
-                or "temperatura" in columnas_texto
-            ):
-                df_debug = valor
-                nombre_df_debug = nombre
-                break
-        
-         if df_debug is None:
-            st.error("No he encontrado ningún DataFrame con columnas tipo TAN, ACI, TEMP o temperatura.")
-         else:
-            st.write("DataFrame encontrado:", nombre_df_debug)
-            st.write("Columnas encontradas:")
-            st.write(list(df_debug.columns))
-            st.dataframe(df_debug.head(20))
-        
-         st.write("col_temp:", _vars.get("col_temp", "NO EXISTE VARIABLE col_temp"))
-         st.write("col_tan:", _vars.get("col_tan", "NO EXISTE VARIABLE col_tan"))
-         st.warning(
-             "La curva MPA está cargada, pero no se ha podido calcular ninguna velocidad teórica. "
-             "Comprueba que el archivo de proceso tenga columnas de temperatura y TAN/acidez para los segmentos."
-         )
-     
-     else:
-         st.success(
-             f"Velocidad teórica MPA calculada en {n_teoricas} segmento(s)."
-         )
+        df_mpa_actual = st.session_state.get("df_mpa")
+    
+        if df_mpa_actual is None or df_mpa_actual.empty:
+            st.warning(
+                "No hay curva MPA cargada. Sube el Excel MPA para calcular la velocidad teórica."
+            )
+    
+            df_comp["Velocidad esperada"] = np.nan
+            df_comp["Velocidad teórica MPA"] = np.nan
+            df_comp["MPA T usada"] = np.nan
+            df_comp["MPA TAN usado"] = np.nan
+            df_comp["MPA material"] = material_sel
+    
+        else:
+            columnas_tabla_mpa = [
+                c for c in df_comp.columns
+                if c not in [
+                    "Refineria",
+                    "Segmento",
+                    "Inicio",
+                    "Fin",
+                    "Días segmento",
+                    "Media velocidades",
+                    "Desviación estándar",
+                    "Coef Variación (%)",
+                    "Velocidad esperada",
+                    "Velocidad teórica MPA",
+                    "Dif Real vs Esperada",
+                    "Dif absoluta",
+                    "MPA T usada",
+                    "MPA TAN usado",
+                    "MPA material"
+                ]
+            ]
+    
+            if not columnas_tabla_mpa:
+                columnas_tabla_mpa = list(df_comp.columns)
+    
+            st.subheader("Columnas de la tabla usadas para interpolar MPA")
+    
+            idx_temp_tabla = indice_columna_sugerida_mpa(
+                columnas_tabla_mpa,
+                [
+                    "temperatura",
+                    "temperature",
+                    "temp",
+                    "t salida",
+                    "t entrada",
+                    "entrada",
+                    "salida",
+                    "t"
+                ]
+            )
+    
+            idx_tan_tabla = indice_columna_sugerida_mpa(
+                columnas_tabla_mpa,
+                [
+                    "tan",
+                    "acidez",
+                    "acid",
+                    "aci"
+                ]
+            )
+    
+            col_temp_tabla_mpa = st.selectbox(
+                "En la tabla comparativa: columna de TEMPERATURA para MPA",
+                columnas_tabla_mpa,
+                index=idx_temp_tabla,
+                key="mpa_col_temp_tabla_comparativa"
+            )
+    
+            col_tan_tabla_mpa = st.selectbox(
+                "En la tabla comparativa: columna de TAN / acidez para MPA",
+                columnas_tabla_mpa,
+                index=idx_tan_tabla,
+                key="mpa_col_tan_tabla_comparativa"
+            )
+    
+            df_comp = aplicar_mpa_desde_tabla_comparativa(
+                df_comp,
+                df_mpa_actual,
+                material_sel,
+                col_temp_tabla_mpa,
+                col_tan_tabla_mpa
+            )
+    
+        columnas_prioritarias = [
+            "Refineria",
+            "Segmento",
+            "Inicio",
+            "Fin",
+            "Media velocidades",
+            "Velocidad teórica MPA",
+            "MPA T usada",
+            "MPA TAN usado",
+            "MPA material",
+            "Dif Real vs Esperada",
+            "Dif absoluta"
+        ]
+    
+        columnas_prioritarias = [
+            c for c in columnas_prioritarias
+            if c in df_comp.columns
+        ]
+    
+        otras_columnas = [
+            c for c in df_comp.columns
+            if c not in columnas_prioritarias
+        ]
+    
+        df_comp = df_comp[columnas_prioritarias + otras_columnas]
+    
+        n_teoricas = pd.to_numeric(
+            df_comp["Velocidad teórica MPA"],
+            errors="coerce"
+        ).notna().sum()
+    
+        if df_mpa_actual is not None and not df_mpa_actual.empty:
+            if n_teoricas > 0:
+                st.success(
+                    f"Velocidad teórica MPA calculada en {n_teoricas} segmento(s)."
+                )
+            else:
+                st.warning(
+                    "La curva MPA está cargada, pero no se ha podido calcular ninguna velocidad teórica. "
+                    "Revisa que hayas elegido bien la columna de temperatura y la columna TAN/acidez de la tabla."
+                )
     # ======================================
     # ANALISIS IMPORTANCIA VARIABLES PROCESO
     # ======================================
