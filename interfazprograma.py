@@ -2161,6 +2161,101 @@ def aplicar_segmentacion_referencia(
     return sorted(nuevos_segmentos, key=lambda x: x["fecha_ini"])
 def analisis_porcentaje_crudos_top_cestas(df_cestas, detalle_crudos):
 
+    columnas_salida = ["Estado", "Cesta", "Crudo", "% promedio"]
+
+    if df_cestas is None or detalle_crudos is None:
+        return pd.DataFrame(columns=columnas_salida)
+
+    if df_cestas.empty or detalle_crudos.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    df_cestas = df_cestas.copy()
+    detalle_crudos = detalle_crudos.copy()
+
+    # =====================================================
+    # Detectar columna de estado
+    # =====================================================
+
+    if "Estado" not in df_cestas.columns:
+
+        if "estado_diag" in df_cestas.columns:
+            df_cestas["Estado"] = df_cestas["estado_diag"]
+
+        elif "Estado_modelo" in df_cestas.columns:
+            df_cestas["Estado"] = df_cestas["Estado_modelo"]
+
+        elif "estado" in df_cestas.columns:
+            df_cestas["Estado"] = df_cestas["estado"]
+
+        else:
+            return pd.DataFrame(columns=columnas_salida)
+
+    # =====================================================
+    # Detectar columna de cesta / especies
+    # =====================================================
+
+    if "Especies" not in df_cestas.columns:
+
+        if "Cesta" in df_cestas.columns:
+            df_cestas["Especies"] = df_cestas["Cesta"].astype(str)
+
+        elif "Segmento" in df_cestas.columns:
+            df_cestas["Especies"] = (
+                "Segmento " + df_cestas["Segmento"].astype(str)
+            )
+
+        else:
+            df_cestas["Especies"] = "Sin cesta"
+
+    # =====================================================
+    # Detectar fechas
+    # =====================================================
+
+    if "Fecha_ini" not in df_cestas.columns:
+
+        if "Fecha_inicio" in df_cestas.columns:
+            df_cestas["Fecha_ini"] = df_cestas["Fecha_inicio"]
+
+        elif "Inicio" in df_cestas.columns:
+            df_cestas["Fecha_ini"] = df_cestas["Inicio"]
+
+        else:
+            return pd.DataFrame(columns=columnas_salida)
+
+    if "Fecha_fin" not in df_cestas.columns:
+
+        if "Fecha_final" in df_cestas.columns:
+            df_cestas["Fecha_fin"] = df_cestas["Fecha_final"]
+
+        elif "Fin" in df_cestas.columns:
+            df_cestas["Fecha_fin"] = df_cestas["Fin"]
+
+        else:
+            return pd.DataFrame(columns=columnas_salida)
+
+    if not {"Fecha", "Especie", "Porcentaje"}.issubset(detalle_crudos.columns):
+        return pd.DataFrame(columns=columnas_salida)
+
+    df_cestas["Fecha_ini"] = pd.to_datetime(
+        df_cestas["Fecha_ini"],
+        errors="coerce"
+    )
+
+    df_cestas["Fecha_fin"] = pd.to_datetime(
+        df_cestas["Fecha_fin"],
+        errors="coerce"
+    )
+
+    detalle_crudos["Fecha"] = pd.to_datetime(
+        detalle_crudos["Fecha"],
+        errors="coerce"
+    )
+
+    detalle_crudos["Porcentaje"] = pd.to_numeric(
+        detalle_crudos["Porcentaje"],
+        errors="coerce"
+    )
+
     resultados = []
 
     for estado in ["ENCIMA", "DEBAJO", "DENTRO"]:
@@ -2170,9 +2265,9 @@ def analisis_porcentaje_crudos_top_cestas(df_cestas, detalle_crudos):
         if sub_estado.empty:
             continue
 
-        # Top 5 cestas
         top_cestas = (
             sub_estado["Especies"]
+            .astype(str)
             .value_counts()
             .head(5)
             .index
@@ -2180,7 +2275,9 @@ def analisis_porcentaje_crudos_top_cestas(df_cestas, detalle_crudos):
 
         for cesta in top_cestas:
 
-            sub_cesta = sub_estado[sub_estado["Especies"] == cesta]
+            sub_cesta = sub_estado[
+                sub_estado["Especies"].astype(str) == str(cesta)
+            ]
 
             porcentajes = []
 
@@ -2188,6 +2285,9 @@ def analisis_porcentaje_crudos_top_cestas(df_cestas, detalle_crudos):
 
                 fi = row["Fecha_ini"]
                 ff = row["Fecha_fin"]
+
+                if pd.isna(fi) or pd.isna(ff):
+                    continue
 
                 sub = detalle_crudos[
                     (detalle_crudos["Fecha"] >= fi) &
@@ -2197,26 +2297,19 @@ def analisis_porcentaje_crudos_top_cestas(df_cestas, detalle_crudos):
                 if sub.empty:
                     continue
 
-                suma = (
-                    sub.groupby("Especie")["Porcentaje"]
-                    .sum()
-                )
-
+                suma = sub.groupby("Especie")["Porcentaje"].sum()
                 total = suma.sum()
 
-                if total == 0:
+                if pd.isna(total) or total == 0:
                     continue
 
                 pct = (suma / total * 100).to_dict()
-
                 porcentajes.append(pct)
 
-            # promedio de porcentajes
             if porcentajes:
 
                 df_pct = pd.DataFrame(porcentajes).fillna(0)
-
-                media_pct = df_pct.mean()
+                media_pct = df_pct.mean(numeric_only=True)
 
                 for crudo, val in media_pct.items():
 
@@ -2226,6 +2319,9 @@ def analisis_porcentaje_crudos_top_cestas(df_cestas, detalle_crudos):
                         "Crudo": crudo,
                         "% promedio": val
                     })
+
+    if not resultados:
+        return pd.DataFrame(columns=columnas_salida)
 
     return pd.DataFrame(resultados)
 def enriquecer_cestas_con_proceso(df_cestas, vars_proceso):
@@ -3298,7 +3394,10 @@ def construir_tabla_corregida(processed_sheets, df_mpa, material, sondas_activas
         df_mpa,
         material
     )
-
+    df_comp = aplicar_mpa_con_seleccion_guardada(
+        df_comp,
+        material_sel
+    )
     if df_comp.empty:
         return df_comp
 
@@ -3548,6 +3647,91 @@ def aplicar_mpa_con_seleccion_guardada(df_tabla, material):
         col_temp,
         col_tan
     )
+
+def obtener_ref_id_de_processed(key, data):
+    """
+    Obtiene la refinería real de una sonda procesada.
+    """
+
+    ref_id = data.get("refineria_id")
+
+    if ref_id is not None:
+        return ref_id
+
+    if isinstance(key, str) and key.startswith("proc|"):
+        partes = key.split("|")
+
+        if len(partes) >= 2:
+            return partes[1]
+
+    return data.get("source_name", "SIN_REFINERIA")
+
+
+def filtrar_processed_por_refineria_ui(processed_filtrado, key_ui):
+    """
+    Obliga a que el análisis use una sola refinería.
+    Si hay varias refinerías seleccionadas, muestra un selector.
+    """
+
+    if processed_filtrado is None or not processed_filtrado:
+        return {}, None
+
+    refinerias = st.session_state.get("refinerias", {})
+
+    mapa_refinerias = {}
+
+    for key, data in processed_filtrado.items():
+
+        ref_id = obtener_ref_id_de_processed(key, data)
+
+        nombre_ref = (
+            refinerias
+            .get(ref_id, {})
+            .get("nombre", ref_id)
+        )
+
+        mapa_refinerias[ref_id] = nombre_ref
+
+    ref_ids = sorted(mapa_refinerias.keys())
+
+    if not ref_ids:
+        return processed_filtrado, None
+
+    if len(ref_ids) == 1:
+
+        ref_id_activo = ref_ids[0]
+
+        st.caption(
+            f"Análisis limitado a refinería: {mapa_refinerias[ref_id_activo]}"
+        )
+
+    else:
+
+        opciones = [
+            f"{mapa_refinerias[ref_id]} | {ref_id}"
+            for ref_id in ref_ids
+        ]
+
+        opcion = st.selectbox(
+            "Selecciona refinería para este análisis",
+            opciones,
+            key=key_ui
+        )
+
+        ref_id_activo = opcion.split("|")[-1].strip()
+
+        st.warning(
+            "Hay varias refinerías seleccionadas. "
+            "El análisis se hará solo con la refinería elegida."
+        )
+
+    processed_ref = {
+        key: data
+        for key, data in processed_filtrado.items()
+        if obtener_ref_id_de_processed(key, data) == ref_id_activo
+    }
+
+    return processed_ref, ref_id_activo
 def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
 
     if df_comp is None or df_comp.empty:
@@ -5064,6 +5248,10 @@ with tabs[2]:
         st.session_state.get("df_mpa"),
         material_sel
     )
+    df_comp = aplicar_mpa_con_seleccion_guardada(
+        df_comp,
+        material_sel
+    )
     if df_comp is not None and not df_comp.empty:
         df_mpa_actual = st.session_state.get("df_mpa")
     
@@ -5713,28 +5901,29 @@ with tabs[3]:
         k: v for k, v in processed.items()
         if k in sondas_seleccionadas and v.get("saved")
     }
-
-    ref_ids_seleccionados = sorted({
-        k.split("|")[1]
-        for k in processed_filtrado.keys()
-        if k.startswith("proc|") and len(k.split("|")) > 2
-    })
-
-    ref_id_crudos_activo = (
-        ref_ids_seleccionados[0]
-        if len(ref_ids_seleccionados) == 1
-        else None
+    
+    # =====================================================
+    # FILTRAR TABLA CORREGIDA A UNA SOLA REFINERÍA
+    # =====================================================
+    
+    processed_filtrado, ref_id_crudos_activo = filtrar_processed_por_refineria_ui(
+        processed_filtrado,
+        key_ui="refineria_tabla_corregida"
     )
-
+    
     detalle_crudos_ref = None
-
+    vars_proceso_ref = []
+    
     if ref_id_crudos_activo is not None:
-        detalle_crudos_ref = (
+    
+        ref_data_activa = (
             st.session_state
             .get("refinerias", {})
             .get(ref_id_crudos_activo, {})
-            .get("detalle_crudos")
         )
+    
+        detalle_crudos_ref = ref_data_activa.get("detalle_crudos")
+        vars_proceso_ref = ref_data_activa.get("vars_proceso", [])
     umbral_diag = st.slider(
         "Tolerancia respecto a la diagonal (mm/año)",
         min_value=0.0,
@@ -5751,7 +5940,10 @@ with tabs[3]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-   
+    df_comp = aplicar_mpa_con_seleccion_guardada(
+        df_comp,
+        material_sel
+    )
     # aplicar filtro de error
     processed_filtrado = aplicar_umbral_error_segmentos(
         processed_filtrado,
@@ -5765,7 +5957,10 @@ with tabs[3]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-    
+    df_comp = aplicar_mpa_con_seleccion_guardada(
+        df_comp,
+        material_sel
+    )
     # Aplicar la misma MPA calculada desde las columnas seleccionadas en Revisión / Guardado
     df_comp = aplicar_mpa_con_seleccion_guardada(df_comp, material_sel)
     
@@ -6023,12 +6218,12 @@ with tabs[3]:
     df_cestas = pd.DataFrame()
     detalle_crudos = detalle_crudos_ref
 
-    if len(ref_ids_seleccionados) > 1:
-        st.warning("Selecciona sondas de una sola refineria para analizar cestas de crudo.")
-
+    if ref_id_crudos_activo is None:
+        st.info("Selecciona una refinería para analizar cestas de crudo.")
+    
     elif detalle_crudos is None or detalle_crudos.empty:
-        st.info("La refineria seleccionada no tiene archivo de crudos asignado.")
-
+        st.info("La refinería seleccionada no tiene archivo de crudos asignado.")
+    
     else:
 
         cestas = construir_cestas_crudo(detalle_crudos)
@@ -6078,7 +6273,7 @@ with tabs[3]:
     # =========================
     df_cestas_proc = enriquecer_cestas_con_proceso(
         df_cestas,
-        st.session_state.get("vars_proceso", [])
+        vars_proceso_ref
     )
     
     st.subheader("Ranking enriquecido de cestas")
@@ -6172,14 +6367,38 @@ with tabs[4]:
         k: v for k, v in processed.items()
         if k in sel_sondas
     }
-
+    # =====================================================
+    # FILTRAR MODELO PREDICTIVO A UNA SOLA REFINERÍA
+    # =====================================================
+    
+    processed_filtrado, ref_id_modelo_activo = filtrar_processed_por_refineria_ui(
+        processed_filtrado,
+        key_ui="refineria_modelo_predictivo"
+    )
+    
+    if not processed_filtrado:
+        st.info("No hay sondas para la refinería seleccionada.")
+        st.stop()
+    
+    ref_data_modelo = (
+        st.session_state
+        .get("refinerias", {})
+        .get(ref_id_modelo_activo, {})
+    )
+    
+    detalle_crudos = ref_data_modelo.get("detalle_crudos")
+    df_proc_modelo = ref_data_modelo.get("df_proc")
+    vars_proceso_modelo = ref_data_modelo.get("vars_proceso", [])
     # 1️⃣ construir tabla base
     df_comp = construir_tabla_segmentos_comparativa(
         processed_filtrado,
         st.session_state.get("df_mpa"),
         material_sel
     )
-    
+    df_comp = aplicar_mpa_con_seleccion_guardada(
+        df_comp,
+        material_sel
+    )
     # 2️⃣ aplicar filtro de error (CLAVE)
     processed_filtrado = aplicar_umbral_error_segmentos(
         processed_filtrado,
@@ -6193,7 +6412,10 @@ with tabs[4]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-    
+    df_comp = aplicar_mpa_con_seleccion_guardada(
+        df_comp,
+        material_sel
+    )
     # Aplicar MPA con la misma selección de columnas usada en Revisión / Guardado
     df_comp = aplicar_mpa_con_seleccion_guardada(df_comp, material_sel)
     
@@ -6226,11 +6448,11 @@ with tabs[4]:
         # =========================
     
         st.subheader("Modelo de datos (Machine Learning)")
-        vars_modelo = st.session_state.get("vars_proceso", [])
+        vars_modelo = vars_proceso_modelo
         
         res = entrenar_modelos_ml(
             df_comp,
-            st.session_state.get("vars_proceso", [])
+            vars_modelo
         )
         if not res or len(res) != 2:
             st.warning("Error en entrenamiento ML")
@@ -6417,7 +6639,10 @@ with tabs[4]:
             st.session_state.get("df_mpa"),
             material_sel
         )
-        
+        df_comp = aplicar_mpa_con_seleccion_guardada(
+            df_comp,
+            material_sel
+        )
         # Volver a aplicar MPA tras reconstruir df_comp para el análisis de errores
         df_comp = aplicar_mpa_con_seleccion_guardada(df_comp, material_sel)
         
@@ -7077,7 +7302,7 @@ with tabs[4]:
         
                     df_master = construir_dataset_crudos_segmentos(
                         detalle_crudos,
-                        st.session_state.get("processed_sheets", {})
+                        processed_filtrado
                     )
         
                     if df_master.empty:
