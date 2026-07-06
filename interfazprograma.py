@@ -4681,13 +4681,14 @@ with tabs[2]:
      
      elif n_teoricas == 0:
          st.subheader("DEBUG cálculo velocidad teórica")
-
-         _vars = locals()
+        
+         _vars = dict(locals())
         
          st.write("DataFrames disponibles en este punto:")
         
          dfs_disponibles = []
-         for nombre, valor in _vars.items():
+        
+         for nombre, valor in list(_vars.items()):
             if isinstance(valor, pd.DataFrame):
                 dfs_disponibles.append(nombre)
         
@@ -4701,15 +4702,20 @@ with tabs[2]:
         
             columnas_texto = " ".join([str(c).lower() for c in valor.columns])
         
-            if "tan" in columnas_texto or "aci" in columnas_texto or "temp" in columnas_texto or "temperatura" in columnas_texto:
+            if (
+                "tan" in columnas_texto
+                or "aci" in columnas_texto
+                or "temp" in columnas_texto
+                or "temperatura" in columnas_texto
+            ):
                 df_debug = valor
                 nombre_df_debug = nombre
                 break
         
          if df_debug is None:
-            st.error("En este punto del código no existe ningún DataFrame claro de proceso.")
+            st.error("No he encontrado ningún DataFrame con columnas tipo TAN, ACI, TEMP o temperatura.")
          else:
-            st.write("DataFrame usado para debug:", nombre_df_debug)
+            st.write("DataFrame encontrado:", nombre_df_debug)
             st.write("Columnas encontradas:")
             st.write(list(df_debug.columns))
             st.dataframe(df_debug.head(20))
