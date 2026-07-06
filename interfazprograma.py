@@ -6106,7 +6106,16 @@ with tabs[4]:
             st.stop()
         
         modelos, y_real = res
-    
+
+        if not modelos:
+            st.warning(
+                "No se ha podido entrenar ningún modelo ML. "
+                "Revisa que haya al menos 10 filas válidas y variables de proceso numéricas con variación."
+            )
+            st.stop()
+        
+        nombre_best = None
+        data_best = None
         mejor_modelo = None
         mejor_r2 = -999
         st.subheader("Tolerancia modelos ML")
@@ -6133,7 +6142,12 @@ with tabs[4]:
                 mejor_r2 = data["r2"]
                 mejor_modelo = (nombre, data)
                 nombre_best, data_best = mejor_modelo
-    
+        if data_best is None:
+            st.warning(
+                "No se ha podido seleccionar un mejor modelo ML. "
+                "Puede que el R² sea NaN o que no haya suficientes datos válidos."
+            )
+            st.stop()
         st.subheader("Importancia variables — mejor modelo ML")
         
         imp_ml = pd.DataFrame({
