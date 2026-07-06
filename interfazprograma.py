@@ -4680,6 +4680,42 @@ with tabs[2]:
          )
      
      elif n_teoricas == 0:
+         st.subheader("DEBUG cálculo velocidad teórica")
+
+         _vars = locals()
+        
+         st.write("DataFrames disponibles en este punto:")
+        
+         dfs_disponibles = []
+         for nombre, valor in _vars.items():
+            if isinstance(valor, pd.DataFrame):
+                dfs_disponibles.append(nombre)
+        
+         st.write(dfs_disponibles)
+        
+         df_debug = None
+         nombre_df_debug = None
+        
+         for nombre in dfs_disponibles:
+            valor = _vars[nombre]
+        
+            columnas_texto = " ".join([str(c).lower() for c in valor.columns])
+        
+            if "tan" in columnas_texto or "aci" in columnas_texto or "temp" in columnas_texto or "temperatura" in columnas_texto:
+                df_debug = valor
+                nombre_df_debug = nombre
+                break
+        
+         if df_debug is None:
+            st.error("En este punto del código no existe ningún DataFrame claro de proceso.")
+         else:
+            st.write("DataFrame usado para debug:", nombre_df_debug)
+            st.write("Columnas encontradas:")
+            st.write(list(df_debug.columns))
+            st.dataframe(df_debug.head(20))
+        
+         st.write("col_temp:", _vars.get("col_temp", "NO EXISTE VARIABLE col_temp"))
+         st.write("col_tan:", _vars.get("col_tan", "NO EXISTE VARIABLE col_tan"))
          st.warning(
              "La curva MPA está cargada, pero no se ha podido calcular ninguna velocidad teórica. "
              "Comprueba que el archivo de proceso tenga columnas de temperatura y TAN/acidez para los segmentos."
