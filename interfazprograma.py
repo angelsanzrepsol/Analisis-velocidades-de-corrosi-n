@@ -638,13 +638,20 @@ def generar_tabla_estimaciones_velocidad(
     material,
     col_temp,
     col_tan,
-    temp_min,
-    temp_max,
-    temp_pasos,
-    tan_min,
-    tan_max,
-    tan_pasos
+    variables_iteracion
 ):
+    """
+    Genera una tabla de estimaciones variando TODAS las variables seleccionadas.
+
+    Ejemplo:
+        TAN + T + S + Caudal
+
+    Para cada variable se genera un rango min/max/pasos y luego se crea
+    el producto cartesiano de todas las combinaciones.
+    """
+
+    from itertools import product
+
     if df_base is None or df_base.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
@@ -652,6 +659,10 @@ def generar_tabla_estimaciones_velocidad(
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     df_base = df_base.copy()
+
+    # =====================================================
+    # VARIABLES USADAS POR LOS MODELOS
+    # =====================================================
 
     features_union = []
 
@@ -663,6 +674,11 @@ def generar_tabla_estimaciones_velocidad(
     if not features_union:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+    # =====================================================
+    # VALORES BASE: mediana de cada variable del modelo
+    # Las variables NO iteradas se quedan fijas en su mediana.
+    # =====================================================
+
     base = {}
 
     for col in features_union:
@@ -672,43 +688,116 @@ def generar_tabla_estimaciones_velocidad(
         else:
             base[col] = np.nan
 
-    temps = np.linspace(float(temp_min), float(temp_max), int(temp_pasos))
-    tans = np.linspace(float(tan_min), float(tan_max), int(tan_pasos))
+    # =====================================================
+    # LIMPIAR VARIABLES A ITERAR
+    # =====================================================
+
+    variables_limpias = []
+
+    for cfg in variables_iteracion:
+
+        var = cfg.get("variable")
+        vmin = cfg.get("min")
+        vmax = cfg.get("max")
+        pasos = cfg.get("pasos")
+
+        if var is None:
+            continue
+
+        vmin = pd.to_numeric(vmin, errors="coerce")
+        vmax = pd.to_numeric(vmax, errors="coerce")
+        pasos = int(pasos)
+
+        if pd.isna(vmin) or pd.isna(vmax):
+            continue
+
+        if pasos < 1:
+            continue
+
+        if vmin > vmax:
+            continue
+
+        valores = np.linspace(float(vmin), float(vmax), pasos)
+
+        variables_limpias.append({
+            "variable": var,
+            "valores": valores
+        })
+
+    if not variables_limpias:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    # =====================================================
+    # CREAR TODAS LAS COMBINACIONES
+    # =====================================================
+
+    nombres_vars = [
+        x["variable"]
+        for x in variables_limpias
+    ]
+
+    listas_valores = [
+        x["valores"]
+        for x in variables_limpias
+    ]
 
     filas = []
 
-    for temp in temps:
-        for tan in tans:
-            fila = {
-                "Temperatura_iterada": temp,
-                "TAN_iterado": tan,
-                "Material": material
-            }
+    for combinacion in product(*listas_valores):
 
-            for col, val in base.items():
-                fila[col] = val
+        fila = {
+            "Material": material
+        }
 
-            fila[col_temp] = temp
-            fila[col_tan] = tan
+        # Primero meter valores base de todas las features del ML
+        for col, val in base.items():
+            fila[col] = val
 
-            filas.append(fila)
+        # Luego sobrescribir con las variables que SÍ estamos iterando
+        for var, valor in zip(nombres_vars, combinacion):
+            fila[var] = valor
+            fila[f"{var}_iterado"] = valor
+
+        # Mantener nombres antiguos para compatibilidad visual
+        if col_temp in fila:
+            fila["Temperatura_iterada"] = fila[col_temp]
+        else:
+            fila["Temperatura_iterada"] = np.nan
+
+        if col_tan in fila:
+            fila["TAN_iterado"] = fila[col_tan]
+        else:
+            fila["TAN_iterado"] = np.nan
+
+        filas.append(fila)
 
     df_estim = pd.DataFrame(filas)
+
+    # =====================================================
+    # PREDICCIÓN ML
+    # =====================================================
 
     columnas_pred_ml = []
 
     for nombre_modelo, modelo_data in modelos.items():
+
         modelo = modelo_data.get("modelo")
 
         if modelo is None:
             continue
 
         try:
-            X_pred = preparar_X_estimacion(df_estim, modelo_data)
+            X_pred = preparar_X_estimacion(
+                df_estim,
+                modelo_data
+            )
+
             pred = modelo.predict(X_pred)
 
             col_pred = f"Velocidad ML - {nombre_modelo}"
+
             df_estim[col_pred] = pred
+
             columnas_pred_ml.append(col_pred)
 
         except Exception as e:
@@ -717,16 +806,24 @@ def generar_tabla_estimaciones_velocidad(
     if columnas_pred_ml:
         df_estim["Velocidad ML media"] = df_estim[columnas_pred_ml].mean(axis=1)
 
-    if df_mpa is not None and not df_mpa.empty:
+    # =====================================================
+    # MPA
+    # OJO: MPA físico sigue dependiendo de T y TAN.
+    # S, Caudal, etc. afectan al ML, pero no a la curva MPA clásica.
+    # =====================================================
+
+    if df_mpa is not None and not df_mpa.empty and col_temp in df_estim.columns and col_tan in df_estim.columns:
+
         df_estim["Velocidad MPA"] = df_estim.apply(
             lambda row: buscar_velocidad_mas_cercana(
                 df_mpa,
-                row["Temperatura_iterada"],
-                row["TAN_iterado"],
+                row[col_temp],
+                row[col_tan],
                 material
             ),
             axis=1
         )
+
     else:
         df_estim["Velocidad MPA"] = np.nan
 
@@ -735,12 +832,18 @@ def generar_tabla_estimaciones_velocidad(
             df_estim["Velocidad ML media"] - df_estim["Velocidad MPA"]
         )
 
+    # =====================================================
+    # IMPORTANCIAS
+    # =====================================================
+
     filas_importancias = []
 
     for nombre_modelo, modelo_data in modelos.items():
+
         importancias = modelo_data.get("importancias", {})
 
         for var, imp in importancias.items():
+
             filas_importancias.append({
                 "Modelo": nombre_modelo,
                 "Variable": var,
@@ -756,8 +859,6 @@ def generar_tabla_estimaciones_velocidad(
     )
 
     return df_estim, df_importancias, df_correlaciones
-
-
 def crear_excel_estimaciones_teoricas(
     df_estim,
     df_importancias,
@@ -6855,9 +6956,9 @@ with tabs[4]:
         st.subheader("Generador teórico de velocidades ML / MPA")
         
         st.caption(
-            "Genera una tabla de estimaciones variando TAN y temperatura. "
-            "El resto de variables del modelo se mantienen en el valor mediano "
-            "de la refinería seleccionada."
+            "Genera una tabla de estimaciones variando todas las variables que selecciones. "
+            "Por ejemplo: TAN, temperatura, S, caudal, carga, etc. "
+            "Las variables no seleccionadas se mantienen en su valor mediano."
         )
         
         df_base_estimador = df_comp.copy()
@@ -6865,9 +6966,39 @@ with tabs[4]:
         if "Velocidad experimental" not in df_base_estimador.columns:
             df_base_estimador["Velocidad experimental"] = df_base_estimador["Media velocidades"]
         
+        # =====================================================
+        # COLUMNAS NUMÉRICAS DISPONIBLES
+        # =====================================================
+        
         cols_numericas_estimador = []
         
+        columnas_no_iterar = [
+            "Refineria",
+            "Segmento",
+            "Inicio",
+            "Fin",
+            "Días segmento",
+            "Media velocidades",
+            "Velocidad experimental",
+            "Velocidad esperada",
+            "Velocidad teórica",
+            "Velocidad teórica MPA",
+            "Velocidad MPA",
+            "Dif Real vs Esperada",
+            "Dif absoluta",
+            "Desviación estándar",
+            "Coef Variación (%)",
+            "MPA material"
+        ]
+        
         for c in df_base_estimador.columns:
+        
+            if c in columnas_no_iterar:
+                continue
+        
+            if "Calidad" in str(c):
+                continue
+        
             serie_num = pd.to_numeric(
                 df_base_estimador[c],
                 errors="coerce"
@@ -6880,6 +7011,11 @@ with tabs[4]:
             st.warning("No hay columnas numéricas para generar estimaciones teóricas.")
         
         else:
+        
+            # =====================================================
+            # DETECTAR COLUMNAS T Y TAN PARA MPA
+            # =====================================================
+        
             col_temp_default = st.session_state.get(
                 "mpa_col_temp_tabla_comparativa",
                 None
@@ -6891,6 +7027,7 @@ with tabs[4]:
             )
         
             def indice_default_estimador(cols, col_guardada, palabras):
+        
                 if col_guardada in cols:
                     return cols.index(col_guardada)
         
@@ -6928,18 +7065,22 @@ with tabs[4]:
             )
         
             col_temp_estimador = st.selectbox(
-                "Variable de TEMPERATURA para iterar",
+                "Columna que representa TEMPERATURA para calcular MPA",
                 cols_numericas_estimador,
                 index=idx_temp_estimador,
                 key="estimador_col_temp"
             )
         
             col_tan_estimador = st.selectbox(
-                "Variable de TAN / acidez para iterar",
+                "Columna que representa TAN / acidez para calcular MPA",
                 cols_numericas_estimador,
                 index=idx_tan_estimador,
                 key="estimador_col_tan"
             )
+        
+            # =====================================================
+            # VARIABLES USADAS POR EL ML
+            # =====================================================
         
             features_usadas = []
         
@@ -6948,89 +7089,196 @@ with tabs[4]:
                     if f not in features_usadas:
                         features_usadas.append(f)
         
-            if col_temp_estimador not in features_usadas:
-                st.warning(
-                    "La columna de temperatura seleccionada no está entre las variables usadas por el ML. "
-                    "Al variarla, cambiará MPA, pero puede no cambiar la predicción ML."
+            opciones_iteracion = [
+                c for c in cols_numericas_estimador
+                if c in features_usadas
+            ]
+        
+            # Si por lo que sea no detecta features, permitir todas las numéricas
+            if not opciones_iteracion:
+                opciones_iteracion = cols_numericas_estimador
+        
+            default_iteracion = []
+        
+            for c in opciones_iteracion:
+        
+                cl = str(c).lower()
+        
+                if (
+                    c == col_temp_estimador
+                    or c == col_tan_estimador
+                    or "tan" in cl
+                    or "temperatura" in cl
+                    or "temperature" in cl
+                    or "azufre" in cl
+                    or cl.strip() == "s"
+                    or "caudal" in cl
+                    or "flow" in cl
+                    or "carga" in cl
+                ):
+                    default_iteracion.append(c)
+        
+            if not default_iteracion:
+                default_iteracion = [
+                    c for c in [col_temp_estimador, col_tan_estimador]
+                    if c in opciones_iteracion
+                ]
+        
+            vars_iterar = st.multiselect(
+                "Variables que quieres variar en el Excel",
+                options=opciones_iteracion,
+                default=default_iteracion,
+                key="estimador_vars_iterar"
+            )
+        
+            if col_temp_estimador not in vars_iterar:
+                st.info(
+                    "La temperatura no está seleccionada para variar. "
+                    "MPA se calculará con la temperatura fija en la mediana."
                 )
         
-            if col_tan_estimador not in features_usadas:
-                st.warning(
-                    "La columna TAN/acidez seleccionada no está entre las variables usadas por el ML. "
-                    "Al variarla, cambiará MPA, pero puede no cambiar la predicción ML."
+            if col_tan_estimador not in vars_iterar:
+                st.info(
+                    "El TAN/acidez no está seleccionado para variar. "
+                    "MPA se calculará con el TAN fijo en la mediana."
                 )
         
-            col1, col2, col3 = st.columns(3)
-        
-            temp_serie = pd.to_numeric(
-                df_base_estimador[col_temp_estimador],
-                errors="coerce"
-            ).dropna()
-        
-            tan_serie = pd.to_numeric(
-                df_base_estimador[col_tan_estimador],
-                errors="coerce"
-            ).dropna()
-        
-            if temp_serie.empty or tan_serie.empty:
-                st.warning(
-                    "La columna de temperatura o TAN seleccionada no tiene valores numéricos."
-                )
+            if not vars_iterar:
+                st.warning("Selecciona al menos una variable para variar.")
         
             else:
-                with col1:
-                    temp_min = st.number_input(
-                        "Temperatura mínima",
-                        value=float(temp_serie.min()),
-                        key="estimador_temp_min"
-                    )
         
-                    temp_max = st.number_input(
-                        "Temperatura máxima",
-                        value=float(temp_serie.max()),
-                        key="estimador_temp_max"
-                    )
+                st.markdown("### Rangos de iteración")
         
-                with col2:
-                    tan_min = st.number_input(
-                        "TAN/acidez mínimo",
-                        value=float(tan_serie.min()),
-                        key="estimador_tan_min"
-                    )
+                variables_iteracion = []
         
-                    tan_max = st.number_input(
-                        "TAN/acidez máximo",
-                        value=float(tan_serie.max()),
-                        key="estimador_tan_max"
-                    )
+                total_combinaciones = 1
         
-                with col3:
-                    temp_pasos = st.number_input(
-                        "Pasos temperatura",
-                        min_value=2,
-                        max_value=200,
-                        value=20,
-                        step=1,
-                        key="estimador_temp_pasos"
-                    )
+                for var in vars_iterar:
         
-                    tan_pasos = st.number_input(
-                        "Pasos TAN/acidez",
-                        min_value=2,
-                        max_value=200,
-                        value=20,
-                        step=1,
-                        key="estimador_tan_pasos"
-                    )
+                    serie = pd.to_numeric(
+                        df_base_estimador[var],
+                        errors="coerce"
+                    ).dropna()
+        
+                    if serie.empty:
+                        st.warning(f"La variable {var} no tiene valores numéricos.")
+                        continue
+        
+                    st.markdown(f"**{var}**")
+        
+                    col_min, col_max, col_pasos = st.columns(3)
+        
+                    with col_min:
+                        vmin = st.number_input(
+                            f"Mínimo {var}",
+                            value=float(serie.min()),
+                            key=f"estimador_min_{make_safe_slug(var)}"
+                        )
+        
+                    with col_max:
+                        vmax = st.number_input(
+                            f"Máximo {var}",
+                            value=float(serie.max()),
+                            key=f"estimador_max_{make_safe_slug(var)}"
+                        )
+        
+                    with col_pasos:
+                        pasos = st.number_input(
+                            f"Pasos {var}",
+                            min_value=1,
+                            max_value=200,
+                            value=10,
+                            step=1,
+                            key=f"estimador_pasos_{make_safe_slug(var)}"
+                        )
+        
+                    if vmin > vmax:
+                        st.error(f"En {var}, el mínimo no puede ser mayor que el máximo.")
+                        continue
+        
+                    variables_iteracion.append({
+                        "variable": var,
+                        "min": vmin,
+                        "max": vmax,
+                        "pasos": pasos
+                    })
+        
+                    total_combinaciones *= int(pasos)
         
                 st.caption(
-                    f"Se generarán aproximadamente {int(temp_pasos) * int(tan_pasos)} combinaciones."
+                    f"Se generarán aproximadamente {total_combinaciones} combinaciones."
                 )
+        
+                if total_combinaciones > 200000:
+                    st.warning(
+                        "Vas a generar muchas combinaciones. "
+                        "Reduce pasos o variables si Streamlit va lento."
+                    )
         
                 if st.button(
                     "Generar Excel de estimaciones teóricas",
                     key="btn_generar_estimaciones_teoricas"
                 ):
+        
+                    if not variables_iteracion:
+                        st.warning("No hay variables válidas para iterar.")
+        
+                    else:
+        
+                        df_estim, df_importancias, df_correlaciones = generar_tabla_estimaciones_velocidad(
+                            df_base=df_base_estimador,
+                            modelos=modelos,
+                            df_mpa=st.session_state.get("df_mpa"),
+                            material=material_sel,
+                            col_temp=col_temp_estimador,
+                            col_tan=col_tan_estimador,
+                            variables_iteracion=variables_iteracion
+                        )
+        
+                        if df_estim.empty:
+                            st.warning("No se ha podido generar la tabla de estimaciones.")
+        
+                        else:
+                            st.success(
+                                f"Tabla generada con {len(df_estim)} combinaciones."
+                            )
+        
+                            st.dataframe(df_estim.head(100))
+        
+                            config_estimador = {
+                                "Refineria": ref_data_modelo.get("nombre", ref_id_modelo_activo)
+                                if "ref_data_modelo" in locals()
+                                else "",
+                                "Material": material_sel,
+                                "Columna temperatura MPA": col_temp_estimador,
+                                "Columna TAN MPA": col_tan_estimador,
+                                "Variables iteradas": ", ".join(
+                                    [x["variable"] for x in variables_iteracion]
+                                ),
+                                "Combinaciones": len(df_estim),
+                                "Modelos": ", ".join(modelos.keys())
+                            }
+        
+                            for cfg in variables_iteracion:
+                                var = cfg["variable"]
+                                config_estimador[f"{var} min"] = cfg["min"]
+                                config_estimador[f"{var} max"] = cfg["max"]
+                                config_estimador[f"{var} pasos"] = cfg["pasos"]
+        
+                            excel_estimaciones = crear_excel_estimaciones_teoricas(
+                                df_estim,
+                                df_importancias,
+                                df_correlaciones,
+                                config_estimador
+                            )
+        
+                            st.download_button(
+                                "Descargar Excel de estimaciones teóricas",
+                                data=excel_estimaciones,
+                                file_name=f"estimaciones_teoricas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            ) 
                     if temp_min > temp_max:
                         st.error("La temperatura mínima no puede ser mayor que la máxima.")
         
