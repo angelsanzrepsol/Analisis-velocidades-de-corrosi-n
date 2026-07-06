@@ -3329,6 +3329,94 @@ def indice_columna_sugerida_mpa(columnas, palabras):
         if any(p in col_limpia for p in palabras):
             return i
     return 0
+def aplicar_mpa_con_seleccion_guardada(df_tabla, material):
+    """
+    Reutiliza la misma selección de columnas MPA hecha en la pestaña
+    Revisión / Guardado para calcular MPA en cualquier otra pestaña.
+    """
+
+    if df_tabla is None or df_tabla.empty:
+        return df_tabla
+
+    df = df_tabla.copy()
+    df_mpa_actual = st.session_state.get("df_mpa")
+
+    if df_mpa_actual is None or df_mpa_actual.empty:
+        df["Velocidad esperada"] = np.nan
+        df["Velocidad teórica MPA"] = np.nan
+        df["MPA T usada"] = np.nan
+        df["MPA TAN usado"] = np.nan
+        df["MPA material"] = material
+        return df
+
+    columnas_excluir = [
+        "Refineria",
+        "Segmento",
+        "Inicio",
+        "Fin",
+        "Días segmento",
+        "Media velocidades",
+        "Desviación estándar",
+        "Coef Variación (%)",
+        "Velocidad esperada",
+        "Velocidad teórica",
+        "Velocidad teórica MPA",
+        "Velocidad experimental",
+        "Dif Real vs Esperada",
+        "Dif absoluta",
+        "MPA T usada",
+        "MPA TAN usado",
+        "MPA material",
+        "delta_diag",
+        "estado_diag"
+    ]
+
+    columnas_tabla_mpa = [
+        c for c in df.columns
+        if c not in columnas_excluir
+    ]
+
+    if not columnas_tabla_mpa:
+        columnas_tabla_mpa = list(df.columns)
+
+    col_temp = st.session_state.get("mpa_col_temp_tabla_comparativa")
+    col_tan = st.session_state.get("mpa_col_tan_tabla_comparativa")
+
+    if col_temp not in df.columns:
+        idx_temp = indice_columna_sugerida_mpa(
+            columnas_tabla_mpa,
+            [
+                "temperatura",
+                "temperature",
+                "temp",
+                "t salida",
+                "t entrada",
+                "entrada",
+                "salida",
+                "t"
+            ]
+        )
+        col_temp = columnas_tabla_mpa[idx_temp]
+
+    if col_tan not in df.columns:
+        idx_tan = indice_columna_sugerida_mpa(
+            columnas_tabla_mpa,
+            [
+                "tan",
+                "acidez",
+                "acid",
+                "aci"
+            ]
+        )
+        col_tan = columnas_tabla_mpa[idx_tan]
+
+    return aplicar_mpa_desde_tabla_comparativa(
+        df,
+        df_mpa_actual,
+        material,
+        col_temp,
+        col_tan
+    )
 def aplicar_umbral_error_segmentos(processed_sheets, df_comp, umbral_cv):
 
     if df_comp is None or df_comp.empty:
@@ -5540,13 +5628,16 @@ with tabs[3]:
         umbral_error_segmento
     )
     
-    # 🔥 RECONSTRUIR tabla ya filtrada
+   # 🔥 RECONSTRUIR tabla ya filtrada
     df_comp = construir_tabla_segmentos_comparativa(
         processed_filtrado,
         st.session_state.get("df_mpa"),
         material_sel
     )
-   
+    
+    # Aplicar la misma MPA calculada desde las columnas seleccionadas en Revisión / Guardado
+    df_comp = aplicar_mpa_con_seleccion_guardada(df_comp, material_sel)
+    
     # =========================================
     # TABLA CORREGIDA FINAL
     # =========================================
@@ -5972,6 +6063,9 @@ with tabs[4]:
         material_sel
     )
     
+    # Aplicar MPA con la misma selección de columnas usada en Revisión / Guardado
+    df_comp = aplicar_mpa_con_seleccion_guardada(df_comp, material_sel)
+    
     # 4️⃣ variable objetivo
     df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
     if modo_modelo == "Segmentos":
@@ -6178,6 +6272,9 @@ with tabs[4]:
             st.session_state.get("df_mpa"),
             material_sel
         )
+        
+        # Volver a aplicar MPA tras reconstruir df_comp para el análisis de errores
+        df_comp = aplicar_mpa_con_seleccion_guardada(df_comp, material_sel)
         
         df_comp["Velocidad experimental"] = df_comp["Media velocidades"]
     
