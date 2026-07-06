@@ -2461,156 +2461,239 @@ valor_intervalo_global = st.sidebar.number_input(
 btn_dividir_global = st.sidebar.button("Dividir TODA la gráfica")
 
 def cargar_y_limpiar_mpa(uploaded_file):
+    """
+    Lee la tabla MPA de forma robusta.
+    Salida estándar esperada por el resto del programa:
+        Temperature, Acid Measurement, Carbon Steel, 5 Cr
+    Admite cabeceras en cualquier fila y en cualquier hoja del Excel.
+    """
 
-    uploaded_file.seek(0)
-
-    # Leer sin asumir que la cabecera está bien colocada
-    df_raw = pd.read_excel(uploaded_file, header=None)
-
-    # Buscar fila de cabecera
-    fila_header = None
-
-    for i in range(min(15, len(df_raw))):
-        textos = df_raw.iloc[i].astype(str).str.lower().tolist()
-        fila_txt = " ".join(textos)
-
-        if (
-            ("temperature" in fila_txt or "temperatura" in fila_txt)
-            and (
-                "acid" in fila_txt
-                or "tan" in fila_txt
-                or "acidez" in fila_txt
-            )
-        ):
-            fila_header = i
-            break
-
-    if fila_header is None:
-        raise ValueError(
-            "No se encontró la cabecera del MPA. "
-            "Necesito columnas tipo Temperature/Temperatura y Acid Measurement/TAN/Acidez."
+    def _clean_txt(x):
+        return (
+            str(x)
+            .strip()
+            .lower()
+            .replace("\n", " ")
+            .replace("º", "°")
         )
 
-    # Reconstruir dataframe con esa cabecera
-    df = df_raw.iloc[fila_header + 1:].copy()
-    df.columns = df_raw.iloc[fila_header].astype(str).str.strip()
-    df = df.reset_index(drop=True)
-
-    # Limpiar nombres de columnas
-    df.columns = [
-        str(c)
-        .strip()
-        .replace("\n", " ")
-        .replace("  ", " ")
-        for c in df.columns
-    ]
-
-    # Detectar columnas reales
-    col_temp = None
-    col_tan = None
-    col_carbon = None
-    col_5cr = None
-
-    for c in df.columns:
-        cl = str(c).lower().strip()
-
-        if col_temp is None and (
-            "temperature" in cl
-            or "temperatura" in cl
-            or cl in ["t", "temp"]
-        ):
-            col_temp = c
-
-        if col_tan is None and (
-            "acid measurement" in cl
-            or "acid" in cl
-            or "tan" in cl
-            or "acidez" in cl
-        ):
-            col_tan = c
-
-        if col_carbon is None and (
-            "carbon steel" in cl
-            or "carbon" in cl
-            or "acero carbono" in cl
-        ):
-            col_carbon = c
-
-        if col_5cr is None and (
-            "5 cr" in cl
-            or "5cr" in cl
-            or "5 cr " in cl
-        ):
-            col_5cr = c
-
-    if col_temp is None or col_tan is None:
-        raise ValueError(
-            f"No se detectaron columnas de temperatura/TAN en MPA. "
-            f"Columnas encontradas: {list(df.columns)}"
-        )
-
-    if col_carbon is None and col_5cr is None:
-        raise ValueError(
-            f"No se detectaron columnas de material en MPA. "
-            f"Necesito Carbon Steel o 5 Cr. Columnas: {list(df.columns)}"
-        )
-
-    # Renombrar a nombres estándar que usa tu código
-    rename = {
-        col_temp: "Temperature",
-        col_tan: "Acid Measurement"
-    }
-
-    if col_carbon is not None:
-        rename[col_carbon] = "Carbon Steel"
-
-    if col_5cr is not None:
-        rename[col_5cr] = "5 Cr"
-
-    df = df.rename(columns=rename)
-
-    cols_necesarias = ["Temperature", "Acid Measurement"]
-
-    if "Carbon Steel" in df.columns:
-        cols_necesarias.append("Carbon Steel")
-
-    if "5 Cr" in df.columns:
-        cols_necesarias.append("5 Cr")
-
-    df = df[cols_necesarias].copy()
-
-    # Limpiar valores numéricos
-    for c in df.columns:
-        df[c] = (
-            df[c]
-            .astype(str)
+    def _normalizar_numero(serie):
+        # Convierte valores tipo '<0,1', '[0.2]', '0,35 mm/y' a número.
+        s = (
+            serie.astype(str)
             .str.replace(",", ".", regex=False)
             .str.replace("<", "", regex=False)
             .str.replace(">", "", regex=False)
             .str.replace("[", "", regex=False)
             .str.replace("]", "", regex=False)
-            .str.strip()
+            .str.extract(r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)", expand=False)
         )
+        return pd.to_numeric(s, errors="coerce")
 
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+    def _detectar_columnas(cols):
+        col_temp = col_tan = col_carbon = col_5cr = None
 
-    df = df.dropna(subset=["Temperature", "Acid Measurement"])
+        for c in cols:
+            cl = _clean_txt(c)
 
-    if df.empty:
-        raise ValueError("El archivo MPA se leyó, pero no quedaron filas válidas.")
+            if col_temp is None and (
+                "temperature" in cl
+                or "temperatura" in cl
+                or cl in ["t", "temp"]
+                or "temp." in cl
+                or "°c" in cl
+                or "deg c" in cl
+            ):
+                col_temp = c
 
-    return df
+            if col_tan is None and (
+                "acid measurement" in cl
+                or "acid" in cl
+                or "tan" in cl
+                or "acidez" in cl
+                or "neutraliz" in cl
+                or "nº neutral" in cl
+                or "numero neutral" in cl
+                or "número neutral" in cl
+            ):
+                col_tan = c
 
+            if col_carbon is None and (
+                "carbon steel" in cl
+                or "carbon" in cl
+                or "acero carbono" in cl
+                or cl in ["cs", "c steel", "c-steel"]
+            ):
+                col_carbon = c
+
+            if col_5cr is None and (
+                "5 cr" in cl
+                or "5cr" in cl
+                or "5%cr" in cl.replace(" ", "")
+                or "5% cr" in cl
+                or "5 % cr" in cl
+                or "5 chrome" in cl
+            ):
+                col_5cr = c
+
+        return col_temp, col_tan, col_carbon, col_5cr
+
+    def _intentar_extraer_tabla(df_raw, nombre_hoja=""):
+        if df_raw is None or df_raw.empty:
+            return None
+
+        # Recorremos todas las filas, no solo las primeras.
+        for fila_header in range(len(df_raw)):
+            header = df_raw.iloc[fila_header].astype(str).str.strip()
+            header_txt = " ".join(_clean_txt(x) for x in header.tolist())
+
+            if not (
+                (
+                    "temperature" in header_txt
+                    or "temperatura" in header_txt
+                    or "temp" in header_txt
+                    or "°c" in header_txt
+                )
+                and (
+                    "acid" in header_txt
+                    or "tan" in header_txt
+                    or "acidez" in header_txt
+                    or "neutraliz" in header_txt
+                )
+            ):
+                continue
+
+            df = df_raw.iloc[fila_header + 1:].copy()
+
+            df.columns = [
+                str(c).strip().replace("\n", " ").replace("  ", " ")
+                for c in header.tolist()
+            ]
+
+            df = df.reset_index(drop=True)
+
+            df = df.loc[
+                :,
+                ~pd.Index(df.columns)
+                .astype(str)
+                .str.lower()
+                .str.startswith("unnamed")
+            ]
+
+            col_temp, col_tan, col_carbon, col_5cr = _detectar_columnas(df.columns)
+
+            if col_temp is None or col_tan is None:
+                continue
+
+            if col_carbon is None and col_5cr is None:
+                continue
+
+            rename = {
+                col_temp: "Temperature",
+                col_tan: "Acid Measurement"
+            }
+
+            if col_carbon is not None:
+                rename[col_carbon] = "Carbon Steel"
+
+            if col_5cr is not None:
+                rename[col_5cr] = "5 Cr"
+
+            df = df.rename(columns=rename)
+
+            cols_necesarias = ["Temperature", "Acid Measurement"]
+
+            if "Carbon Steel" in df.columns:
+                cols_necesarias.append("Carbon Steel")
+
+            if "5 Cr" in df.columns:
+                cols_necesarias.append("5 Cr")
+
+            df = df[cols_necesarias].copy()
+
+            for c in df.columns:
+                df[c] = _normalizar_numero(df[c])
+
+            df = df.dropna(subset=["Temperature", "Acid Measurement"])
+
+            material_cols = [
+                c for c in ["Carbon Steel", "5 Cr"]
+                if c in df.columns
+            ]
+
+            if material_cols:
+                df = df.dropna(subset=material_cols, how="all")
+
+            if not df.empty:
+                df = df.sort_values(
+                    ["Temperature", "Acid Measurement"]
+                ).reset_index(drop=True)
+
+                df.attrs["mpa_sheet"] = nombre_hoja
+
+                return df
+
+        return None
+
+    uploaded_file.seek(0)
+
+    try:
+        hojas = pd.read_excel(
+            uploaded_file,
+            sheet_name=None,
+            header=None
+        )
+    except Exception as e:
+        raise ValueError(f"No se pudo abrir el Excel MPA: {e}")
+
+    errores = []
+
+    for nombre_hoja, df_raw in hojas.items():
+        try:
+            df = _intentar_extraer_tabla(
+                df_raw,
+                nombre_hoja=nombre_hoja
+            )
+
+            if df is not None and not df.empty:
+                return df
+
+        except Exception as e:
+            errores.append(f"{nombre_hoja}: {e}")
+
+    detalle = " | ".join(errores[:3]) if errores else "sin cabecera compatible detectada"
+
+    raise ValueError(
+        "No se pudo leer la curva MPA. Necesito una tabla con columnas de "
+        "Temperatura/Temperature, TAN/Acid Measurement y al menos una columna de material "
+        "Carbon Steel o 5 Cr. Detalle: " + detalle
+    )
 if uploaded_mpa is not None:
 
     try:
         df_mpa = cargar_y_limpiar_mpa(uploaded_mpa)
 
         st.session_state["df_mpa"] = df_mpa
-        st.sidebar.success("Curvas MPA cargadas")
+
+        hoja_mpa = df_mpa.attrs.get("mpa_sheet", "")
+
+        cols_material = [
+            c for c in ["Carbon Steel", "5 Cr"]
+            if c in df_mpa.columns
+        ]
+
+        st.sidebar.success(
+            f"Curvas MPA cargadas: {len(df_mpa)} filas"
+            + (f" · hoja: {hoja_mpa}" if hoja_mpa else "")
+            + (f" · materiales: {', '.join(cols_material)}" if cols_material else "")
+        )
 
     except Exception as e:
+        st.session_state.pop("df_mpa", None)
         st.sidebar.error(f"Error leyendo MPA: {e}")
+
+else:
+    st.session_state.pop("df_mpa", None)
 
 st.sidebar.markdown("---")
 
@@ -3055,8 +3138,20 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
 
     df_tmp = df_mpa.copy()
 
-    df_tmp["Temperature"] = pd.to_numeric(df_tmp["Temperature"], errors="coerce")
-    df_tmp["Acid Measurement"] = pd.to_numeric(df_tmp["Acid Measurement"], errors="coerce")
+    columnas_base = ["Temperature", "Acid Measurement"]
+
+    if not set(columnas_base).issubset(df_tmp.columns):
+        return None
+
+    df_tmp["Temperature"] = pd.to_numeric(
+        df_tmp["Temperature"],
+        errors="coerce"
+    )
+
+    df_tmp["Acid Measurement"] = pd.to_numeric(
+        df_tmp["Acid Measurement"],
+        errors="coerce"
+    )
 
     material_txt = str(material).lower()
 
@@ -3065,10 +3160,23 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
     else:
         col_material = "Carbon Steel"
 
+    # Si el usuario pide un material que no existe,
+    # usar el otro si está disponible.
     if col_material not in df_tmp.columns:
-        return None
+        alternativas = [
+            c for c in ["Carbon Steel", "5 Cr"]
+            if c in df_tmp.columns
+        ]
 
-    df_tmp[col_material] = pd.to_numeric(df_tmp[col_material], errors="coerce")
+        if not alternativas:
+            return None
+
+        col_material = alternativas[0]
+
+    df_tmp[col_material] = pd.to_numeric(
+        df_tmp[col_material],
+        errors="coerce"
+    )
 
     df_tmp = df_tmp.dropna(
         subset=["Temperature", "Acid Measurement", col_material]
@@ -3077,9 +3185,21 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
     if df_tmp.empty:
         return None
 
+    # Distancia normalizada:
+    # evita que la temperatura pese muchísimo más que el TAN.
+    rango_temp = df_tmp["Temperature"].max() - df_tmp["Temperature"].min()
+    rango_tan = df_tmp["Acid Measurement"].max() - df_tmp["Acid Measurement"].min()
+
+    if pd.isna(rango_temp) or rango_temp == 0:
+        rango_temp = 1.0
+
+    if pd.isna(rango_tan) or rango_tan == 0:
+        rango_tan = 1.0
+
     df_tmp["dist"] = (
-        (df_tmp["Temperature"] - temp) ** 2 +
-        (df_tmp["Acid Measurement"] - tan) ** 2
+        ((df_tmp["Temperature"] - temp) / rango_temp) ** 2
+        +
+        ((df_tmp["Acid Measurement"] - tan) / rango_tan) ** 2
     )
 
     fila = df_tmp.loc[df_tmp["dist"].idxmin()]
@@ -3151,7 +3271,10 @@ def calcular_segmentos_crudo(df):
     return resumen
 def calcular_perfil_teorico_por_segmentos(df_filtrado, segmentos, df_mpa, material):
 
-    if df_mpa is None:
+    if df_mpa is None or df_filtrado is None or df_filtrado.empty:
+        return None
+
+    if not {"Temperature", "Acid Measurement"}.issubset(df_mpa.columns):
         return None
 
     df_teo = df_filtrado[["Sent Time", "UT measurement (mm)"]].copy()
@@ -3159,40 +3282,96 @@ def calcular_perfil_teorico_por_segmentos(df_filtrado, segmentos, df_mpa, materi
 
     df_teo["Vel_teorica"] = np.nan
 
-    # asignar velocidad teórica a cada fecha según segmento
+    def _extraer_temp_tan(medias):
+
+        if medias is None:
+            return None, None
+
+        if isinstance(medias, pd.Series):
+            md = medias.to_dict()
+
+        elif isinstance(medias, dict):
+            md = medias
+
+        else:
+            return None, None
+
+        temp = md.get("T", None)
+        tan = md.get("TAN", None)
+
+        if temp is None or pd.isna(pd.to_numeric(temp, errors="coerce")):
+            for k, v in md.items():
+                nombre = str(k).lower()
+
+                if (
+                    "temperatura" in nombre
+                    or "temperature" in nombre
+                    or "t salida" in nombre
+                    or "entrada" in nombre
+                    or nombre.strip() in ["t", "temp"]
+                ):
+                    temp = v
+                    break
+
+        if tan is None or pd.isna(pd.to_numeric(tan, errors="coerce")):
+            for k, v in md.items():
+                nombre = str(k).lower()
+
+                if (
+                    "tan" in nombre
+                    or "acidez" in nombre
+                    or "acid" in nombre
+                    or "neutraliz" in nombre
+                ):
+                    tan = v
+                    break
+
+        temp = pd.to_numeric(temp, errors="coerce")
+        tan = pd.to_numeric(tan, errors="coerce")
+
+        if pd.isna(temp) or pd.isna(tan):
+            return None, None
+
+        return temp, tan
+
+    # Asignar velocidad teórica a cada fecha según segmento
     for seg in segmentos:
 
         if seg.get("estado") != "valido":
             continue
 
-        medias = seg.get("medias")
+        temp, tan = _extraer_temp_tan(seg.get("medias"))
 
-        if medias is None:
-            continue
-
-        medias_dict = dict(medias)
-
-        temp = medias_dict.get("T")
-        tan = medias_dict.get("TAN")
-
-        if pd.isna(temp) or pd.isna(tan):
+        if temp is None or tan is None:
             continue
 
         vel = buscar_velocidad_mas_cercana(
             df_mpa,
-            float(temp),
-            float(tan),
+            temp,
+            tan,
             material
         )
+
+        if vel is None or pd.isna(vel):
+            continue
 
         fi = pd.to_datetime(seg["fecha_ini"])
         ff = pd.to_datetime(seg["fecha_fin"])
 
-        mask = (df_teo["Fecha"] >= fi) & (df_teo["Fecha"] <= ff)
+        mask = (
+            (df_teo["Fecha"] >= fi)
+            &
+            (df_teo["Fecha"] <= ff)
+        )
 
         df_teo.loc[mask, "Vel_teorica"] = vel
 
-    # integrar velocidades → espesor teórico
+    # Si no se ha podido calcular ninguna velocidad,
+    # no dibujar una línea falsa plana.
+    if df_teo["Vel_teorica"].dropna().empty:
+        return None
+
+    # Integrar velocidades → espesor teórico
     espesor_teo = [df_teo["UT measurement (mm)"].iloc[0]]
 
     fechas = pd.to_datetime(df_teo["Fecha"])
@@ -3205,7 +3384,7 @@ def calcular_perfil_teorico_por_segmentos(df_filtrado, segmentos, df_mpa, materi
             espesor_teo.append(espesor_teo[-1])
             continue
 
-        delta_dias = (fechas.iloc[i] - fechas.iloc[i-1]).days
+        delta_dias = (fechas.iloc[i] - fechas.iloc[i - 1]).days
 
         perdida = vel * (delta_dias / 365.25)
 
@@ -4456,7 +4635,60 @@ with tabs[2]:
         st.session_state.get("df_mpa"),
         material_sel
     )
-   
+    if df_comp is not None and not df_comp.empty:
+     
+     # Alias visible para que la velocidad MPA aparezca claramente en esta pestaña
+     df_comp["Velocidad teórica MPA"] = df_comp.get(
+         "Velocidad esperada",
+         np.nan
+     )
+     
+     columnas_prioritarias = [
+         "Refineria",
+         "Segmento",
+         "Inicio",
+         "Fin",
+         "Media velocidades",
+         "Velocidad teórica MPA",
+         "MPA T usada",
+         "MPA TAN usado",
+         "MPA material",
+         "Dif Real vs Esperada",
+         "Dif absoluta"
+     ]
+     
+     columnas_prioritarias = [
+         c for c in columnas_prioritarias
+         if c in df_comp.columns
+     ]
+     
+     otras_columnas = [
+         c for c in df_comp.columns
+         if c not in columnas_prioritarias
+     ]
+     
+     df_comp = df_comp[columnas_prioritarias + otras_columnas]
+     
+     n_teoricas = pd.to_numeric(
+         df_comp["Velocidad teórica MPA"],
+         errors="coerce"
+     ).notna().sum()
+     
+     if st.session_state.get("df_mpa") is None:
+         st.warning(
+             "No hay curva MPA cargada. Sube el Excel MPA para calcular la velocidad teórica."
+         )
+     
+     elif n_teoricas == 0:
+         st.warning(
+             "La curva MPA está cargada, pero no se ha podido calcular ninguna velocidad teórica. "
+             "Comprueba que el archivo de proceso tenga columnas de temperatura y TAN/acidez para los segmentos."
+         )
+     
+     else:
+         st.success(
+             f"Velocidad teórica MPA calculada en {n_teoricas} segmento(s)."
+         )
     # ======================================
     # ANALISIS IMPORTANCIA VARIABLES PROCESO
     # ======================================
@@ -4589,13 +4821,18 @@ with tabs[2]:
                     )
                     
                     if df_teo is not None:
-                    
+
                         ax.plot(
                             df_teo["Fecha"],
                             df_teo["Espesor_teorico"],
                             linestyle="--",
                             linewidth=2,
                             label="Perfil teórico MPA"
+                        )
+                    
+                    else:
+                        st.warning(
+                            "No se pudo dibujar el perfil teórico MPA para esta sonda: falta MPA o faltan T/TAN en sus segmentos."
                         )
                     
                      # Quitar leyenda solo en esta pestaña
@@ -4650,6 +4887,16 @@ with tabs[2]:
                                 label="Diferencia REAL - TEÓRICA (mm)",
                                 value=f"{diferencia:.4f}"
                             )
+                            vel_media_teorica = pd.to_numeric(
+                                df_teo["Vel_teorica"],
+                                errors="coerce"
+                            ).dropna().mean()
+                            
+                            if not pd.isna(vel_media_teorica):
+                                st.metric(
+                                    label="Velocidad teórica media MPA (mm/año)",
+                                    value=f"{vel_media_teorica:.4f}"
+                                )
                     
                     except Exception:
                         st.write("No se pudo calcular pérdidas de grosor")
