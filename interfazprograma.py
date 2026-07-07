@@ -861,27 +861,10 @@ def generar_tabla_estimaciones_velocidad(
     return df_estim, df_importancias, df_correlaciones
 def crear_excel_estimaciones_teoricas(
     df_estim,
-    df_importancias=None,
-    df_correlaciones=None,
-    config=None
+    df_importancias,
+    df_correlaciones,
+    config
 ):
-    """
-    Crea un Excel SOLO con la tabla de estimaciones.
-    No mete importancias, correlaciones ni configuración.
-    """
-
-    output = io.BytesIO()
-
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_estim.to_excel(
-            writer,
-            index=False,
-            sheet_name="Estimaciones"
-        )
-
-    output.seek(0)
-
-    return output
     output = io.BytesIO()
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -7163,32 +7146,8 @@ with tabs[4]:
                                 f"Tabla generada con {len(df_estim)} combinaciones."
                             )
         
-                            # =====================================================
-                            # EXCEL LIMPIO:
-                            # Solo variables seleccionadas + velocidades ML
-                            # =====================================================
-                            
-                            variables_excel = [
-                                str(cfg["variable"])
-                                for cfg in variables_iteracion
-                                if str(cfg["variable"]) in df_estim.columns
-                            ]
-                            
-                            columnas_ml_excel = [
-                                c for c in df_estim.columns
-                                if str(c).startswith("Velocidad ML")
-                            ]
-                            
-                            columnas_excel = list(
-                                dict.fromkeys(
-                                    variables_excel + columnas_ml_excel
-                                )
-                            )
-                            
-                            df_estim_excel = df_estim[columnas_excel].copy()
-                            
-                            st.dataframe(df_estim_excel.head(100))
-                                    
+                            st.dataframe(df_estim.head(100))
+        
                             config_estimador = {
                                 "Refineria": ref_data_modelo.get("nombre", ref_id_modelo_activo)
                                 if "ref_data_modelo" in locals()
@@ -7211,7 +7170,7 @@ with tabs[4]:
                                 config_estimador[f"{var} pasos"] = cfg["pasos"]
         
                             excel_estimaciones = crear_excel_estimaciones_teoricas(
-                                df_estim_excel,
+                                df_estim,
                                 df_importancias,
                                 df_correlaciones,
                                 config_estimador
