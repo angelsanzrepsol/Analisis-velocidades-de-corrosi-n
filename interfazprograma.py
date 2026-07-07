@@ -861,27 +861,10 @@ def generar_tabla_estimaciones_velocidad(
     return df_estim, df_importancias, df_correlaciones
 def crear_excel_estimaciones_teoricas(
     df_estim,
-    df_importancias=None,
-    df_correlaciones=None,
-    config=None
+    df_importancias,
+    df_correlaciones,
+    config
 ):
-    """
-    Crea un Excel SOLO con la tabla de estimaciones.
-    No mete importancias, correlaciones ni configuración.
-    """
-
-    output = io.BytesIO()
-
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_estim.to_excel(
-            writer,
-            index=False,
-            sheet_name="Estimaciones"
-        )
-
-    output.seek(0)
-
-    return output
     output = io.BytesIO()
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -7163,32 +7146,8 @@ with tabs[4]:
                                 f"Tabla generada con {len(df_estim)} combinaciones."
                             )
         
-                            # =====================================================
-                            # EXCEL LIMPIO:
-                            # Solo variables seleccionadas + velocidades ML
-                            # =====================================================
-                            
-                            variables_excel = [
-                                str(cfg["variable"])
-                                for cfg in variables_iteracion
-                                if str(cfg["variable"]) in df_estim.columns
-                            ]
-                            
-                            columnas_ml_excel = [
-                                c for c in df_estim.columns
-                                if str(c).startswith("Velocidad ML")
-                            ]
-                            
-                            columnas_excel = list(
-                                dict.fromkeys(
-                                    variables_excel + columnas_ml_excel
-                                )
-                            )
-                            
-                            df_estim_excel = df_estim[columnas_excel].copy()
-                            
-                            st.dataframe(df_estim_excel.head(100))
-                                    
+                            st.dataframe(df_estim.head(100))
+        
                             config_estimador = {
                                 "Refineria": ref_data_modelo.get("nombre", ref_id_modelo_activo)
                                 if "ref_data_modelo" in locals()
@@ -7211,7 +7170,7 @@ with tabs[4]:
                                 config_estimador[f"{var} pasos"] = cfg["pasos"]
         
                             excel_estimaciones = crear_excel_estimaciones_teoricas(
-                                df_estim_excel,
+                                df_estim,
                                 df_importancias,
                                 df_correlaciones,
                                 config_estimador
@@ -7264,64 +7223,81 @@ with tabs[4]:
                                     )
                             
                                     df_graf = df_estim.copy()
-                                    
+                            
+                                    # Variables extra distintas de T y TAN.
+                                    # Si también has variado S, caudal, carga, etc.,
+                                    # aquí eliges un valor fijo para poder dibujar curvas 2D.
+                                    vars_extra_graf = [
+                                        cfg["variable"]
+                                        for cfg in variables_iteracion
+                                        if cfg["variable"] not in [col_temp_estimador, col_tan_estimador]
+                                    ]
+                            
+                                    for var_extra in vars_extra_graf:
+                            
+                                        if var_extra not in df_graf.columns:
+                                            continue
+                            
+                                        valores_extra = (
+                                            pd.to_numeric(df_graf[var_extra], errors="coerce")
+                                            .dropna()
+                                            .drop_duplicates()
+                                            .sort_values()
+                                            .tolist()
+                                        )
+                            
+                                        if not valores_extra:
+                                            continue
+                            
+                                        valor_default = valores_extra[len(valores_extra) // 2]
+                            
+                                        valor_sel = st.selectbox(
+                                            f"Valor fijo para {var_extra}",
+                                            valores_extra,
+                                            index=valores_extra.index(valor_default),
+                                            key=f"graf_curvas_fijo_{make_safe_slug(var_extra)}"
+                                        )
+                            
+                                        df_graf = df_graf[
+                                            np.isclose(
+                                                pd.to_numeric(df_graf[var_extra], errors="coerce"),
+                                                float(valor_sel),
+                                                equal_nan=False
+                                            )
+                                        ]
+                            
                                     df_graf[col_temp_estimador] = pd.to_numeric(
                                         df_graf[col_temp_estimador],
                                         errors="coerce"
                                     )
-                                    
+                            
                                     df_graf[col_tan_estimador] = pd.to_numeric(
                                         df_graf[col_tan_estimador],
                                         errors="coerce"
                                     )
-                                    
+                            
                                     df_graf[col_y_graf] = pd.to_numeric(
                                         df_graf[col_y_graf],
                                         errors="coerce"
                                     )
-                                    
+                            
                                     df_graf = df_graf.dropna(
                                         subset=[col_temp_estimador, col_tan_estimador, col_y_graf]
                                     )
-                                    
+                            
                                     if df_graf.empty:
                                         st.info("No hay datos suficientes para dibujar la gráfica.")
-                                    
+                            
                                     else:
-                                        # =====================================================
-                                        # Si también varías S, Caudal, carga, etc.,
-                                        # no se fija un único valor.
-                                        # Se promedia la velocidad para cada pareja T-TAN.
-                                        # Así salen TODAS las curvas TAN.
-                                        # =====================================================
-                                    
-                                        df_graf = (
-                                            df_graf
-                                            .groupby(
-                                                [col_tan_estimador, col_temp_estimador],
-                                                as_index=False
-                                            )[col_y_graf]
-                                            .mean()
-                                        )
-                                    
-                                        num_tan = df_graf[col_tan_estimador].nunique()
-                                    
-                                        if num_tan <= 1:
-                                            st.warning(
-                                                "Solo hay un valor de TAN en la tabla generada. "
-                                                "Para ver varias curvas, asegúrate de seleccionar TAN como variable a variar "
-                                                "y poner más de 1 paso."
-                                            )
-                                    
                                         df_graf["TAN curva"] = (
                                             "TAN " +
                                             df_graf[col_tan_estimador].round(4).astype(str)
                                         )
-                                    
+                            
                                         df_graf = df_graf.sort_values(
                                             [col_tan_estimador, col_temp_estimador]
                                         )
-                                    
+                            
                                         fig_curvas = px.line(
                                             df_graf,
                                             x=col_temp_estimador,
@@ -7330,13 +7306,13 @@ with tabs[4]:
                                             markers=True,
                                             title=f"{col_y_graf} en función de {col_temp_estimador} y {col_tan_estimador}"
                                         )
-                                    
+                            
                                         fig_curvas.update_layout(
                                             xaxis_title=col_temp_estimador,
                                             yaxis_title=col_y_graf,
-                                            legend_title="Curvas TAN"
+                                            legend_title="Curvas"
                                         )
-                                    
+                            
                                         st.plotly_chart(
                                             fig_curvas,
                                             use_container_width=True,
