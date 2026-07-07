@@ -6862,9 +6862,77 @@ with tabs[4]:
             df_base_estimador["Velocidad experimental"] = df_base_estimador["Media velocidades"]
         
         # =====================================================
-        # VARIABLES DISPONIBLES = FEATURES REALES DEL MODELO ML
+        # VARIABLES DISPONIBLES PARA EL GENERADOR
+        # SOLO VARIABLES DE PROCESO REALES
         # =====================================================
         
+        def es_columna_proceso_valida_para_generador(col):
+            """
+            Devuelve True solo si la columna parece una variable de proceso real.
+            Excluye velocidades, MPA, diferencias, calidad, fechas, estados, etc.
+            """
+        
+            cl = str(col).strip().lower()
+        
+            palabras_prohibidas = [
+                "velocidad",
+                "media velocidades",
+                "velocidad experimental",
+                "velocidad esperada",
+                "velocidad teorica",
+                "velocidad teórica",
+                "velocidad mpa",
+                "velocidad ml",
+                "dif",
+                "diferencia",
+                "mpa",
+                "material",
+                "calidad",
+                "r2",
+                "segmento",
+                "refineria",
+                "refinería",
+                "inicio",
+                "fin",
+                "fecha",
+                "dias",
+                "días",
+                "estado",
+                "sonda",
+                "hoja",
+                "crudo",
+                "especies",
+                "coef",
+                "desviacion",
+                "desviación",
+                "std"
+            ]
+        
+            if any(p in cl for p in palabras_prohibidas):
+                return False
+        
+            return True
+        
+        
+        # 1) Variables de proceso reales guardadas al leer el Excel de proceso
+        vars_proceso_ref = []
+        
+        if "ref_data_modelo" in locals() and isinstance(ref_data_modelo, dict):
+            vars_proceso_ref = ref_data_modelo.get("vars_proceso", [])
+        
+        if not vars_proceso_ref and "ref_id_modelo_activo" in locals():
+            vars_proceso_ref = (
+                st.session_state
+                .get("refinerias", {})
+                .get(ref_id_modelo_activo, {})
+                .get("vars_proceso", [])
+            )
+        
+        if not vars_proceso_ref:
+            vars_proceso_ref = st.session_state.get("vars_proceso", [])
+        
+        
+        # 2) Features reales del modelo ML
         features_usadas = []
         
         for _, modelo_data in modelos.items():
@@ -6872,11 +6940,25 @@ with tabs[4]:
                 if f not in features_usadas:
                     features_usadas.append(f)
         
-        cols_numericas_estimador = []
         
-        for c in features_usadas:
+        # 3) El generador SOLO debe permitir:
+        #    - columnas que estén en vars_proceso_ref
+        #    - columnas que estén en df_base_estimador
+        #    - columnas numéricas
+        #    - columnas usadas realmente por el ML
+        #    - columnas que no sean velocidad/MPA/calidad/etc.
+        
+        opciones_iteracion = []
+        
+        for c in vars_proceso_ref:
         
             if c not in df_base_estimador.columns:
+                continue
+        
+            if c not in features_usadas:
+                continue
+        
+            if not es_columna_proceso_valida_para_generador(c):
                 continue
         
             serie_num = pd.to_numeric(
@@ -6884,99 +6966,65 @@ with tabs[4]:
                 errors="coerce"
             )
         
-            if serie_num.notna().sum() > 0:
-                cols_numericas_estimador.append(c)
+            if serie_num.notna().sum() < 2:
+                continue
         
-        cols_numericas_estimador = list(dict.fromkeys(cols_numericas_estimador))
+            if serie_num.nunique(dropna=True) <= 1:
+                continue
         
-        if not cols_numericas_estimador:
+            opciones_iteracion.append(c)
+        
+        
+        # 4) Eliminar duplicados conservando orden
+        opciones_iteracion = list(dict.fromkeys(opciones_iteracion))
+        
+        
+        if not opciones_iteracion:
             st.warning(
-                "El modelo ML tiene features, pero no se han encontrado esas columnas "
-                "en la tabla base. Revisa que las variables usadas por el ML estén presentes en df_comp."
+                "No hay variables de proceso válidas para el generador. "
+                "El modelo ML debe estar entrenado con variables de proceso como T, TAN, S, Caudal, Carga, etc."
             )
         
-        else:
+            with st.expander("Diagnóstico de variables"):
+                st.write("Variables de proceso detectadas:", vars_proceso_ref)
+                st.write("Variables usadas por el modelo ML:", features_usadas)
+                st.write("Columnas disponibles en df_comp:", list(df_base_estimador.columns))
         
-            def buscar_columna_por_nombre(columnas, tipo):
-        
-                columnas = list(columnas)
-        
-                if tipo == "temp":
-                    exactas = ["T", "Temperature", "Temperatura"]
-                    palabras = [
-                        "temperature",
-                        "temperatura",
-                        "temp",
-                        "t salida",
-                        "t entrada",
-                        "entrada",
-                        "salida"
-                    ]
-        
-                else:
-                    exactas = ["TAN", "Acid Measurement", "Acid Measurements"]
-                    palabras = [
-                        "tan",
-                        "acid measurement",
-                        "acid measurements",
-                        "acid",
-                        "acidez"
-                    ]
-        
-                for e in exactas:
-                    if e in columnas:
-                        return e
-        
-                for c in columnas:
-                    cl = str(c).lower()
-                    if any(p in cl for p in palabras):
-                        return c
-        
-                return None
+            st.stop()
         
         
-            col_temp_estimador = buscar_columna_por_nombre(
-                cols_numericas_estimador,
-                "temp"
-            )
+        # 5) Selección por defecto: variables de proceso típicas
+        default_iteracion = []
         
-            col_tan_estimador = buscar_columna_por_nombre(
-                cols_numericas_estimador,
-                "tan"
-            )
+        for c in opciones_iteracion:
         
-            opciones_iteracion = cols_numericas_estimador
+            cl = str(c).lower()
         
-            default_iteracion = []
+            if (
+                "tan" in cl
+                or "temperatura" in cl
+                or "temperature" in cl
+                or "temp" in cl
+                or "azufre" in cl
+                or cl.strip() == "s"
+                or "s |" in cl
+                or "| s" in cl
+                or "caudal" in cl
+                or "flow" in cl
+                or "carga" in cl
+                or "presion" in cl
+                or "presión" in cl
+                or "pressure" in cl
+            ):
+                default_iteracion.append(c)
         
-            for c in opciones_iteracion:
+        default_iteracion = [
+            c for c in default_iteracion
+            if c in opciones_iteracion
+        ]
         
-                cl = str(c).lower()
-        
-                if (
-                    c == col_temp_estimador
-                    or c == col_tan_estimador
-                    or "tan" in cl
-                    or "temperatura" in cl
-                    or "temperature" in cl
-                    or "temp" in cl
-                    or "azufre" in cl
-                    or cl.strip() == "s"
-                    or "s |" in cl
-                    or "| s" in cl
-                    or "caudal" in cl
-                    or "flow" in cl
-                    or "carga" in cl
-                ):
-                    default_iteracion.append(c)
-        
-            default_iteracion = [
-                c for c in default_iteracion
-                if c in opciones_iteracion
-            ]
-        
-            if not default_iteracion:
-                default_iteracion = opciones_iteracion
+        if not default_iteracion:
+            default_iteracion = opciones_iteracion
         
             vars_iterar = st.multiselect(
                 "Variables que quieres variar en el Excel",
