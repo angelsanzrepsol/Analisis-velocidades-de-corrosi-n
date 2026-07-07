@@ -7096,50 +7096,6 @@ with tabs[4]:
                             variables_iteracion=variables_iteracion
                         )
         
-                        if df_estim.empty:
-                            st.warning("No se ha podido generar la tabla de estimaciones.")
-        
-                        else:
-                            st.success(
-                                f"Tabla generada con {len(df_estim)} combinaciones."
-                            )
-        
-                            st.dataframe(df_estim.head(100))
-        
-                            config_estimador = {
-                                "Refineria": ref_data_modelo.get("nombre", ref_id_modelo_activo)
-                                if "ref_data_modelo" in locals()
-                                else "",
-                                "Material": material_sel,
-                                "Columna temperatura MPA": col_temp_estimador,
-                                "Columna TAN MPA": col_tan_estimador,
-                                "Variables iteradas": ", ".join(
-                                    [x["variable"] for x in variables_iteracion]
-                                ),
-                                "Combinaciones": len(df_estim),
-                                "Modelos": ", ".join(modelos.keys())
-                            }
-        
-                            for cfg in variables_iteracion:
-                                var = cfg["variable"]
-                                config_estimador[f"{var} min"] = cfg["min"]
-                                config_estimador[f"{var} max"] = cfg["max"]
-                                config_estimador[f"{var} pasos"] = cfg["pasos"]
-        
-                            excel_estimaciones = crear_excel_estimaciones_teoricas(
-                                df_estim,
-                                df_importancias,
-                                df_correlaciones,
-                                config_estimador
-                            )
-        
-                            st.download_button(
-                                "Descargar Excel de estimaciones teóricas",
-                                data=excel_estimaciones,
-                                file_name=f"estimaciones_teoricas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            ) 
-                 
         
                         if df_estim.empty:
                             st.warning("No se ha podido generar la tabla de estimaciones.")
@@ -7183,8 +7139,9 @@ with tabs[4]:
                                 "Descargar Excel de estimaciones teóricas",
                                 data=excel_estimaciones,
                                 file_name=f"estimaciones_teoricas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            ) 
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="download_estimaciones_teoricas_multivariable"
+                            )
         # IMPORTANCIA MPA
         imp_mpa = importancia_mpa(df_comp)
         
