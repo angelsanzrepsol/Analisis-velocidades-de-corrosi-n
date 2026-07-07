@@ -3087,116 +3087,114 @@ btn_dividir_global = st.sidebar.button("Dividir TODA la gráfica")
 
 def cargar_y_limpiar_mpa(uploaded_file):
     """
-    Lee la tabla MPA de forma robusta.
-    Salida estándar esperada por el resto del programa:
-        Temperature, Acid Measurement, Carbon Steel, 5 Cr
-    Admite cabeceras en cualquier fila y en cualquier hoja del Excel.
+    Lee automáticamente el Excel MPA.
+
+    El Excel MPA debe contener:
+    - Temperature
+    - Acid Measurement / Acid Measurements
+    - Carbon Steel
+    - 5 Cr
+
+    Internamente se normaliza a:
+    - Temperature
+    - Acid Measurement
+    - Carbon Steel
+    - 5 Cr
     """
 
-    def _clean_txt(x):
+    def limpiar_nombre_columna(c):
         return (
-            str(x)
+            str(c)
             .strip()
-            .lower()
             .replace("\n", " ")
-            .replace("º", "°")
+            .replace("  ", " ")
         )
 
-    def _normalizar_numero(serie):
-        # Convierte valores tipo '<0,1', '[0.2]', '0,35 mm/y' a número.
-        s = (
-            serie.astype(str)
+    def normalizar_columna(c):
+        cl = limpiar_nombre_columna(c).lower()
+
+        if cl == "temperature" or "temperature" in cl:
+            return "Temperature"
+
+        if (
+            cl == "acid measurement"
+            or cl == "acid measurements"
+            or "acid measurement" in cl
+            or "acid measurements" in cl
+            or cl == "tan"
+            or "tan" in cl
+        ):
+            return "Acid Measurement"
+
+        if (
+            cl == "carbon steel"
+            or "carbon steel" in cl
+            or "carbon" in cl
+            or "acero carbono" in cl
+        ):
+            return "Carbon Steel"
+
+        if (
+            cl == "5 cr"
+            or cl == "5cr"
+            or "5 cr" in cl
+            or "5cr" in cl
+            or "5 % cr" in cl
+            or "5%cr" in cl.replace(" ", "")
+        ):
+            return "5 Cr"
+
+        return limpiar_nombre_columna(c)
+
+    def convertir_numero_columna(s):
+        return pd.to_numeric(
+            s.astype(str)
             .str.replace(",", ".", regex=False)
             .str.replace("<", "", regex=False)
             .str.replace(">", "", regex=False)
             .str.replace("[", "", regex=False)
             .str.replace("]", "", regex=False)
-            .str.extract(r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)", expand=False)
+            .str.extract(r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)", expand=False),
+            errors="coerce"
         )
-        return pd.to_numeric(s, errors="coerce")
 
-    def _detectar_columnas(cols):
-        col_temp = col_tan = col_carbon = col_5cr = None
+    uploaded_file.seek(0)
 
-        for c in cols:
-            cl = _clean_txt(c)
+    hojas = pd.read_excel(
+        uploaded_file,
+        sheet_name=None,
+        header=None
+    )
 
-            if col_temp is None and (
-                "temperature" in cl
-                or "temperatura" in cl
-                or cl in ["t", "temp"]
-                or "temp." in cl
-                or "°c" in cl
-                or "deg c" in cl
-            ):
-                col_temp = c
+    for nombre_hoja, df_raw in hojas.items():
 
-            if col_tan is None and (
-                "acid measurement" in cl
-                or "acid" in cl
-                or "tan" in cl
-                or "acidez" in cl
-                or "neutraliz" in cl
-                or "nº neutral" in cl
-                or "numero neutral" in cl
-                or "número neutral" in cl
-            ):
-                col_tan = c
-
-            if col_carbon is None and (
-                "carbon steel" in cl
-                or "carbon" in cl
-                or "acero carbono" in cl
-                or cl in ["cs", "c steel", "c-steel"]
-            ):
-                col_carbon = c
-
-            if col_5cr is None and (
-                "5 cr" in cl
-                or "5cr" in cl
-                or "5%cr" in cl.replace(" ", "")
-                or "5% cr" in cl
-                or "5 % cr" in cl
-                or "5 chrome" in cl
-            ):
-                col_5cr = c
-
-        return col_temp, col_tan, col_carbon, col_5cr
-
-    def _intentar_extraer_tabla(df_raw, nombre_hoja=""):
-        if df_raw is None or df_raw.empty:
-            return None
-
-        # Recorremos todas las filas, no solo las primeras.
         for fila_header in range(len(df_raw)):
-            header = df_raw.iloc[fila_header].astype(str).str.strip()
-            header_txt = " ".join(_clean_txt(x) for x in header.tolist())
 
-            if not (
-                (
-                    "temperature" in header_txt
-                    or "temperatura" in header_txt
-                    or "temp" in header_txt
-                    or "°c" in header_txt
-                )
-                and (
-                    "acid" in header_txt
-                    or "tan" in header_txt
-                    or "acidez" in header_txt
-                    or "neutraliz" in header_txt
-                )
-            ):
+            posibles_cols = [
+                limpiar_nombre_columna(x)
+                for x in df_raw.iloc[fila_header].tolist()
+            ]
+
+            posibles_norm = [
+                normalizar_columna(x)
+                for x in posibles_cols
+            ]
+
+            tiene_temp = "Temperature" in posibles_norm
+            tiene_tan = "Acid Measurement" in posibles_norm
+            tiene_material = (
+                "Carbon Steel" in posibles_norm
+                or "5 Cr" in posibles_norm
+            )
+
+            if not (tiene_temp and tiene_tan and tiene_material):
                 continue
 
             df = df_raw.iloc[fila_header + 1:].copy()
-
-            df.columns = [
-                str(c).strip().replace("\n", " ").replace("  ", " ")
-                for c in header.tolist()
-            ]
-
+            df.columns = posibles_norm
             df = df.reset_index(drop=True)
 
+            # Quitar columnas vacías / unnamed
             df = df.loc[
                 :,
                 ~pd.Index(df.columns)
@@ -3205,26 +3203,8 @@ def cargar_y_limpiar_mpa(uploaded_file):
                 .str.startswith("unnamed")
             ]
 
-            col_temp, col_tan, col_carbon, col_5cr = _detectar_columnas(df.columns)
-
-            if col_temp is None or col_tan is None:
-                continue
-
-            if col_carbon is None and col_5cr is None:
-                continue
-
-            rename = {
-                col_temp: "Temperature",
-                col_tan: "Acid Measurement"
-            }
-
-            if col_carbon is not None:
-                rename[col_carbon] = "Carbon Steel"
-
-            if col_5cr is not None:
-                rename[col_5cr] = "5 Cr"
-
-            df = df.rename(columns=rename)
+            # Si hay columnas duplicadas, quedarse con la primera
+            df = df.loc[:, ~pd.Index(df.columns).duplicated()]
 
             cols_necesarias = ["Temperature", "Acid Measurement"]
 
@@ -3237,17 +3217,21 @@ def cargar_y_limpiar_mpa(uploaded_file):
             df = df[cols_necesarias].copy()
 
             for c in df.columns:
-                df[c] = _normalizar_numero(df[c])
+                df[c] = convertir_numero_columna(df[c])
 
-            df = df.dropna(subset=["Temperature", "Acid Measurement"])
+            df = df.dropna(
+                subset=["Temperature", "Acid Measurement"]
+            )
 
-            material_cols = [
+            cols_velocidad = [
                 c for c in ["Carbon Steel", "5 Cr"]
                 if c in df.columns
             ]
 
-            if material_cols:
-                df = df.dropna(subset=material_cols, how="all")
+            df = df.dropna(
+                subset=cols_velocidad,
+                how="all"
+            )
 
             if not df.empty:
                 df = df.sort_values(
@@ -3258,40 +3242,10 @@ def cargar_y_limpiar_mpa(uploaded_file):
 
                 return df
 
-        return None
-
-    uploaded_file.seek(0)
-
-    try:
-        hojas = pd.read_excel(
-            uploaded_file,
-            sheet_name=None,
-            header=None
-        )
-    except Exception as e:
-        raise ValueError(f"No se pudo abrir el Excel MPA: {e}")
-
-    errores = []
-
-    for nombre_hoja, df_raw in hojas.items():
-        try:
-            df = _intentar_extraer_tabla(
-                df_raw,
-                nombre_hoja=nombre_hoja
-            )
-
-            if df is not None and not df.empty:
-                return df
-
-        except Exception as e:
-            errores.append(f"{nombre_hoja}: {e}")
-
-    detalle = " | ".join(errores[:3]) if errores else "sin cabecera compatible detectada"
-
     raise ValueError(
-        "No se pudo leer la curva MPA. Necesito una tabla con columnas de "
-        "Temperatura/Temperature, TAN/Acid Measurement y al menos una columna de material "
-        "Carbon Steel o 5 Cr. Detalle: " + detalle
+        "No se pudo leer el Excel MPA automáticamente. "
+        "Debe contener columnas Temperature, Acid Measurement(s), "
+        "Carbon Steel y/o 5 Cr."
     )
 if uploaded_mpa is not None:
 
@@ -3308,50 +3262,18 @@ if uploaded_mpa is not None:
         ]
 
         st.sidebar.success(
-            f"Curvas MPA cargadas: {len(df_mpa)} filas"
+            f"Curvas MPA cargadas automáticamente: {len(df_mpa)} filas"
             + (f" · hoja: {hoja_mpa}" if hoja_mpa else "")
             + (f" · materiales: {', '.join(cols_material)}" if cols_material else "")
         )
-        st.subheader("Configuración curva MPA")
 
-        columnas_mpa = list(df_mpa.columns)
-        
-        col_temp_mpa = st.selectbox(
-            "MPA: columna de temperatura",
-            columnas_mpa,
-            key="col_temp_mpa"
-        )
-        
-        col_tan_mpa = st.selectbox(
-            "MPA: columna de TAN / acidez",
-            columnas_mpa,
-            key="col_tan_mpa"
-        )
-        
-        col_vel_mpa = st.selectbox(
-            "MPA: columna de velocidad teórica",
-            columnas_mpa,
-            key="col_vel_mpa"
-        )
-        
-        st.write("Columnas MPA seleccionadas:")
-        st.write("Temperatura MPA:", col_temp_mpa)
-        st.write("TAN MPA:", col_tan_mpa)
-        st.write("Velocidad MPA:", col_vel_mpa)
-        
-        interpolador_lineal_mpa, interpolador_cercano_mpa = crear_interpolador_mpa(
-            df_mpa,
-            col_temp_mpa,
-            col_tan_mpa,
-            col_vel_mpa
-        )
     except Exception as e:
         st.session_state.pop("df_mpa", None)
         st.sidebar.error(f"Error leyendo MPA: {e}")
 
 else:
     st.session_state.pop("df_mpa", None)
-
+    
 st.sidebar.markdown("---")
 
 umbral_factor = st.sidebar.slider(
@@ -3787,11 +3709,15 @@ def obtener_cv_seguro(df):
     return pd.to_numeric(df["Coef Variación (%)"], errors="coerce")
 def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
     """
-    Interpola la curva MPA usando:
-        Temperature + Acid Measurement -> Carbon Steel / 5 Cr
+    Calcula la velocidad MPA automáticamente.
 
-    Si el punto queda fuera de la zona interpolable, usa el punto más cercano
-    como respaldo.
+    Usa siempre:
+    - Temperature
+    - Acid Measurement
+
+    Y como velocidad usa:
+    - Carbon Steel si el material seleccionado es Carbon Steel
+    - 5 Cr si el material seleccionado contiene 5 o Cr
     """
 
     if df_mpa is None or df_mpa.empty:
@@ -3825,7 +3751,9 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
     df_tmp[col_tan] = convertir_numero_mpa(df_tmp[col_tan])
     df_tmp[col_material] = convertir_numero_mpa(df_tmp[col_material])
 
-    df_tmp = df_tmp.dropna(subset=[col_temp, col_tan, col_material])
+    df_tmp = df_tmp.dropna(
+        subset=[col_temp, col_tan, col_material]
+    )
 
     if df_tmp.empty:
         return None
@@ -3837,22 +3765,39 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
 
     if len(df_tmp) >= 3:
         try:
-            interpolador_lineal = LinearNDInterpolator(puntos, valores)
-            valor = interpolador_lineal(float(temp), float(tan))
+            interpolador_lineal = LinearNDInterpolator(
+                puntos,
+                valores
+            )
+
+            valor = interpolador_lineal(
+                float(temp),
+                float(tan)
+            )
+
             valor = float(valor)
+
         except Exception:
             valor = np.nan
 
     if pd.isna(valor):
         try:
-            interpolador_cercano = NearestNDInterpolator(puntos, valores)
-            valor = float(interpolador_cercano(float(temp), float(tan)))
+            interpolador_cercano = NearestNDInterpolator(
+                puntos,
+                valores
+            )
+
+            valor = float(
+                interpolador_cercano(
+                    float(temp),
+                    float(tan)
+                )
+            )
+
         except Exception:
             return None
 
     return valor
-
-
 def aplicar_mpa_desde_tabla_comparativa(df_comp, df_mpa, material, col_temp_tabla, col_tan_tabla):
     """
     Calcula la velocidad MPA usando las columnas YA EXISTENTES de la tabla comparativa.
@@ -3910,14 +3855,15 @@ def indice_columna_sugerida_mpa(columnas, palabras):
     return 0
 def aplicar_mpa_con_seleccion_guardada(df_tabla, material):
     """
-    Reutiliza la misma selección de columnas MPA hecha en la pestaña
-    Revisión / Guardado para calcular MPA en cualquier otra pestaña.
+    Calcula MPA sin configuración manual.
+    Busca automáticamente columnas T y TAN en la tabla comparativa.
     """
 
     if df_tabla is None or df_tabla.empty:
         return df_tabla
 
     df = df_tabla.copy()
+
     df_mpa_actual = st.session_state.get("df_mpa")
 
     if df_mpa_actual is None or df_mpa_actual.empty:
@@ -3928,66 +3874,53 @@ def aplicar_mpa_con_seleccion_guardada(df_tabla, material):
         df["MPA material"] = material
         return df
 
-    columnas_excluir = [
-        "Refineria",
-        "Segmento",
-        "Inicio",
-        "Fin",
-        "Días segmento",
-        "Media velocidades",
-        "Desviación estándar",
-        "Coef Variación (%)",
-        "Velocidad esperada",
-        "Velocidad teórica",
-        "Velocidad teórica MPA",
-        "Velocidad experimental",
-        "Dif Real vs Esperada",
-        "Dif absoluta",
-        "MPA T usada",
-        "MPA TAN usado",
-        "MPA material",
-        "delta_diag",
-        "estado_diag"
-    ]
+    def buscar_columna_automatica(columnas, tipo):
 
-    columnas_tabla_mpa = [
-        c for c in df.columns
-        if c not in columnas_excluir
-    ]
+        columnas = list(columnas)
 
-    if not columnas_tabla_mpa:
-        columnas_tabla_mpa = list(df.columns)
-
-    col_temp = st.session_state.get("mpa_col_temp_tabla_comparativa")
-    col_tan = st.session_state.get("mpa_col_tan_tabla_comparativa")
-
-    if col_temp not in df.columns:
-        idx_temp = indice_columna_sugerida_mpa(
-            columnas_tabla_mpa,
-            [
-                "temperatura",
+        if tipo == "temp":
+            prioridad_exacta = ["T", "Temperature", "Temperatura"]
+            palabras = [
                 "temperature",
+                "temperatura",
                 "temp",
                 "t salida",
                 "t entrada",
                 "entrada",
-                "salida",
-                "t"
+                "salida"
             ]
-        )
-        col_temp = columnas_tabla_mpa[idx_temp]
 
-    if col_tan not in df.columns:
-        idx_tan = indice_columna_sugerida_mpa(
-            columnas_tabla_mpa,
-            [
+        else:
+            prioridad_exacta = ["TAN", "Acid Measurement", "Acid Measurements"]
+            palabras = [
                 "tan",
-                "acidez",
+                "acid measurement",
+                "acid measurements",
                 "acid",
-                "aci"
+                "acidez"
             ]
-        )
-        col_tan = columnas_tabla_mpa[idx_tan]
+
+        for nombre in prioridad_exacta:
+            if nombre in columnas:
+                return nombre
+
+        for c in columnas:
+            cl = str(c).lower()
+            if any(p in cl for p in palabras):
+                return c
+
+        return None
+
+    col_temp = buscar_columna_automatica(df.columns, "temp")
+    col_tan = buscar_columna_automatica(df.columns, "tan")
+
+    if col_temp is None or col_tan is None:
+        df["Velocidad esperada"] = np.nan
+        df["Velocidad teórica MPA"] = np.nan
+        df["MPA T usada"] = np.nan
+        df["MPA TAN usado"] = np.nan
+        df["MPA material"] = material
+        return df
 
     return aplicar_mpa_desde_tabla_comparativa(
         df,
@@ -5616,76 +5549,9 @@ with tabs[2]:
             df_comp["MPA material"] = material_sel
     
         else:
-            columnas_tabla_mpa = [
-                c for c in df_comp.columns
-                if c not in [
-                    "Refineria",
-                    "Segmento",
-                    "Inicio",
-                    "Fin",
-                    "Días segmento",
-                    "Media velocidades",
-                    "Desviación estándar",
-                    "Coef Variación (%)",
-                    "Velocidad esperada",
-                    "Velocidad teórica MPA",
-                    "Dif Real vs Esperada",
-                    "Dif absoluta",
-                    "MPA T usada",
-                    "MPA TAN usado",
-                    "MPA material"
-                ]
-            ]
-    
-            if not columnas_tabla_mpa:
-                columnas_tabla_mpa = list(df_comp.columns)
-    
-            st.subheader("Columnas de la tabla usadas para interpolar MPA")
-    
-            idx_temp_tabla = indice_columna_sugerida_mpa(
-                columnas_tabla_mpa,
-                [
-                    "temperatura",
-                    "temperature",
-                    "temp",
-                    "t salida",
-                    "t entrada",
-                    "entrada",
-                    "salida",
-                    "t"
-                ]
-            )
-    
-            idx_tan_tabla = indice_columna_sugerida_mpa(
-                columnas_tabla_mpa,
-                [
-                    "tan",
-                    "acidez",
-                    "acid",
-                    "aci"
-                ]
-            )
-    
-            col_temp_tabla_mpa = st.selectbox(
-                "En la tabla comparativa: columna de TEMPERATURA para MPA",
-                columnas_tabla_mpa,
-                index=idx_temp_tabla,
-                key="mpa_col_temp_tabla_comparativa"
-            )
-    
-            col_tan_tabla_mpa = st.selectbox(
-                "En la tabla comparativa: columna de TAN / acidez para MPA",
-                columnas_tabla_mpa,
-                index=idx_tan_tabla,
-                key="mpa_col_tan_tabla_comparativa"
-            )
-    
-            df_comp = aplicar_mpa_desde_tabla_comparativa(
+            df_comp = aplicar_mpa_con_seleccion_guardada(
                 df_comp,
-                df_mpa_actual,
-                material_sel,
-                col_temp_tabla_mpa,
-                col_tan_tabla_mpa
+                material_sel
             )
     
         columnas_prioritarias = [
@@ -7012,71 +6878,65 @@ with tabs[4]:
         
         else:
         
-            # =====================================================
-            # DETECTAR COLUMNAS T Y TAN PARA MPA
-            # =====================================================
+            def buscar_columna_estimador_automatica(columnas, tipo):
         
-            col_temp_default = st.session_state.get(
-                "mpa_col_temp_tabla_comparativa",
-                None
-            )
-        
-            col_tan_default = st.session_state.get(
-                "mpa_col_tan_tabla_comparativa",
-                None
-            )
-        
-            def indice_default_estimador(cols, col_guardada, palabras):
-        
-                if col_guardada in cols:
-                    return cols.index(col_guardada)
-        
-                for i, col in enumerate(cols):
-                    cl = str(col).lower()
+                columnas = list(columnas)
+            
+                if tipo == "temp":
+                    prioridad_exacta = ["T", "Temperature", "Temperatura"]
+                    palabras = [
+                        "temperature",
+                        "temperatura",
+                        "temp",
+                        "t salida",
+                        "t entrada",
+                        "entrada",
+                        "salida"
+                    ]
+            
+                else:
+                    prioridad_exacta = ["TAN", "Acid Measurement", "Acid Measurements"]
+                    palabras = [
+                        "tan",
+                        "acid measurement",
+                        "acid measurements",
+                        "acid",
+                        "acidez"
+                    ]
+            
+                for nombre in prioridad_exacta:
+                    if nombre in columnas:
+                        return nombre
+            
+                for c in columnas:
+                    cl = str(c).lower()
                     if any(p in cl for p in palabras):
-                        return i
-        
-                return 0
-        
-            idx_temp_estimador = indice_default_estimador(
+                        return c
+            
+                return None
+            
+            
+            col_temp_estimador = buscar_columna_estimador_automatica(
                 cols_numericas_estimador,
-                col_temp_default,
-                [
-                    "temperatura",
-                    "temperature",
-                    "temp",
-                    "t salida",
-                    "t entrada",
-                    "entrada",
-                    "salida",
-                    "t"
-                ]
+                "temp"
             )
-        
-            idx_tan_estimador = indice_default_estimador(
+            
+            col_tan_estimador = buscar_columna_estimador_automatica(
                 cols_numericas_estimador,
-                col_tan_default,
-                [
-                    "tan",
-                    "acidez",
-                    "acid",
-                    "aci"
-                ]
+                "tan"
             )
-        
-            col_temp_estimador = st.selectbox(
-                "Columna que representa TEMPERATURA para calcular MPA",
-                cols_numericas_estimador,
-                index=idx_temp_estimador,
-                key="estimador_col_temp"
-            )
-        
-            col_tan_estimador = st.selectbox(
-                "Columna que representa TAN / acidez para calcular MPA",
-                cols_numericas_estimador,
-                index=idx_tan_estimador,
-                key="estimador_col_tan"
-            )
+            
+            if col_temp_estimador is None:
+                st.warning(
+                    "No se ha encontrado automáticamente la columna de temperatura. "
+                    "Debe llamarse T, Temperature, Temperatura o similar."
+                )
+            
+            if col_tan_estimador is None:
+                st.warning(
+                    "No se ha encontrado automáticamente la columna TAN/acidez. "
+                    "Debe llamarse TAN, Acid Measurement, Acid Measurements o similar."
+                )
         
             # =====================================================
             # VARIABLES USADAS POR EL ML
@@ -7131,13 +6991,13 @@ with tabs[4]:
                 key="estimador_vars_iterar"
             )
         
-            if col_temp_estimador not in vars_iterar:
+            if col_temp_estimador is not None and col_temp_estimador not in vars_iterar:
                 st.info(
                     "La temperatura no está seleccionada para variar. "
                     "MPA se calculará con la temperatura fija en la mediana."
                 )
-        
-            if col_tan_estimador not in vars_iterar:
+            
+            if col_tan_estimador is not None and col_tan_estimador not in vars_iterar:
                 st.info(
                     "El TAN/acidez no está seleccionado para variar. "
                     "MPA se calculará con el TAN fijo en la mediana."
@@ -7279,27 +7139,7 @@ with tabs[4]:
                                 file_name=f"estimaciones_teoricas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                             ) 
-                    if temp_min > temp_max:
-                        st.error("La temperatura mínima no puede ser mayor que la máxima.")
-        
-                    elif tan_min > tan_max:
-                        st.error("El TAN mínimo no puede ser mayor que el máximo.")
-        
-                    else:
-                        df_estim, df_importancias, df_correlaciones = generar_tabla_estimaciones_velocidad(
-                            df_base=df_base_estimador,
-                            modelos=modelos,
-                            df_mpa=st.session_state.get("df_mpa"),
-                            material=material_sel,
-                            col_temp=col_temp_estimador,
-                            col_tan=col_tan_estimador,
-                            temp_min=temp_min,
-                            temp_max=temp_max,
-                            temp_pasos=temp_pasos,
-                            tan_min=tan_min,
-                            tan_max=tan_max,
-                            tan_pasos=tan_pasos
-                        )
+                 
         
                         if df_estim.empty:
                             st.warning("No se ha podido generar la tabla de estimaciones.")
@@ -7316,16 +7156,21 @@ with tabs[4]:
                                 if "ref_data_modelo" in locals()
                                 else "",
                                 "Material": material_sel,
-                                "Columna temperatura": col_temp_estimador,
-                                "Columna TAN": col_tan_estimador,
-                                "Temp min": temp_min,
-                                "Temp max": temp_max,
-                                "Temp pasos": temp_pasos,
-                                "TAN min": tan_min,
-                                "TAN max": tan_max,
-                                "TAN pasos": tan_pasos,
+                                "Columna temperatura MPA": col_temp_estimador,
+                                "Columna TAN MPA": col_tan_estimador,
+                                "Variables iteradas": ", ".join(
+                                    [str(x["variable"]) for x in variables_iteracion]
+                                ),
+                                "Combinaciones": len(df_estim),
                                 "Modelos": ", ".join(modelos.keys())
                             }
+                            
+                            for cfg in variables_iteracion:
+                                var = str(cfg["variable"])
+                            
+                                config_estimador[f"{var} min"] = cfg["min"]
+                                config_estimador[f"{var} max"] = cfg["max"]
+                                config_estimador[f"{var} pasos"] = cfg["pasos"]
         
                             excel_estimaciones = crear_excel_estimaciones_teoricas(
                                 df_estim,
