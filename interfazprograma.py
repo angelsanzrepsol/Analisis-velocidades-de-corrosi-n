@@ -634,13 +634,20 @@ def calcular_correlaciones_estimador(
 def generar_tabla_estimaciones_velocidad(
     df_base,
     modelos,
+    df_mpa,
+    material,
+    col_temp,
+    col_tan,
     variables_iteracion
 ):
     """
-    Generador teórico SOLO ML.
+    Genera una tabla de estimaciones variando TODAS las variables seleccionadas.
 
-    Crea combinaciones con las variables seleccionadas y calcula únicamente
-    velocidades predichas por los modelos ML.
+    Ejemplo:
+        TAN + T + S + Caudal
+
+    Para cada variable se genera un rango min/max/pasos y luego se crea
+    el producto cartesiano de todas las combinaciones.
     """
 
     from itertools import product
@@ -654,7 +661,7 @@ def generar_tabla_estimaciones_velocidad(
     df_base = df_base.copy()
 
     # =====================================================
-    # FEATURES REALES USADAS POR LOS MODELOS ML
+    # VARIABLES USADAS POR LOS MODELOS
     # =====================================================
 
     features_union = []
@@ -668,31 +675,21 @@ def generar_tabla_estimaciones_velocidad(
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     # =====================================================
-    # VALORES BASE: mediana de cada feature
-    # Las variables no iteradas quedan fijas en su mediana.
+    # VALORES BASE: mediana de cada variable del modelo
+    # Las variables NO iteradas se quedan fijas en su mediana.
     # =====================================================
 
     base = {}
 
     for col in features_union:
-
-        mediana_modelo = None
-
-        for _, modelo_data in modelos.items():
-            medianas = modelo_data.get("medianas", {})
-            if col in medianas:
-                mediana_modelo = medianas[col]
-                break
-
         if col in df_base.columns:
             serie = pd.to_numeric(df_base[col], errors="coerce")
             base[col] = serie.median()
-
         else:
-            base[col] = mediana_modelo
+            base[col] = np.nan
 
     # =====================================================
-    # PREPARAR VARIABLES A ITERAR
+    # LIMPIAR VARIABLES A ITERAR
     # =====================================================
 
     variables_limpias = []
@@ -730,6 +727,10 @@ def generar_tabla_estimaciones_velocidad(
     if not variables_limpias:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+    # =====================================================
+    # CREAR TODAS LAS COMBINACIONES
+    # =====================================================
+
     nombres_vars = [
         x["variable"]
         for x in variables_limpias
@@ -740,23 +741,33 @@ def generar_tabla_estimaciones_velocidad(
         for x in variables_limpias
     ]
 
-    # =====================================================
-    # CREAR TODAS LAS COMBINACIONES
-    # =====================================================
-
     filas = []
 
     for combinacion in product(*listas_valores):
 
-        fila = {}
+        fila = {
+            "Material": material
+        }
 
-        # Primero poner todas las features del modelo a su valor base
+        # Primero meter valores base de todas las features del ML
         for col, val in base.items():
             fila[col] = val
 
-        # Sobrescribir las variables que el usuario quiere variar
+        # Luego sobrescribir con las variables que SÍ estamos iterando
         for var, valor in zip(nombres_vars, combinacion):
             fila[var] = valor
+            fila[f"{var}_iterado"] = valor
+
+        # Mantener nombres antiguos para compatibilidad visual
+        if col_temp in fila:
+            fila["Temperatura_iterada"] = fila[col_temp]
+        else:
+            fila["Temperatura_iterada"] = np.nan
+
+        if col_tan in fila:
+            fila["TAN_iterado"] = fila[col_tan]
+        else:
+            fila["TAN_iterado"] = np.nan
 
         filas.append(fila)
 
@@ -796,6 +807,32 @@ def generar_tabla_estimaciones_velocidad(
         df_estim["Velocidad ML media"] = df_estim[columnas_pred_ml].mean(axis=1)
 
     # =====================================================
+    # MPA
+    # OJO: MPA físico sigue dependiendo de T y TAN.
+    # S, Caudal, etc. afectan al ML, pero no a la curva MPA clásica.
+    # =====================================================
+
+    if df_mpa is not None and not df_mpa.empty and col_temp in df_estim.columns and col_tan in df_estim.columns:
+
+        df_estim["Velocidad MPA"] = df_estim.apply(
+            lambda row: buscar_velocidad_mas_cercana(
+                df_mpa,
+                row[col_temp],
+                row[col_tan],
+                material
+            ),
+            axis=1
+        )
+
+    else:
+        df_estim["Velocidad MPA"] = np.nan
+
+    if "Velocidad ML media" in df_estim.columns:
+        df_estim["Diferencia ML media vs MPA"] = (
+            df_estim["Velocidad ML media"] - df_estim["Velocidad MPA"]
+        )
+
+    # =====================================================
     # IMPORTANCIAS
     # =====================================================
 
@@ -806,6 +843,7 @@ def generar_tabla_estimaciones_velocidad(
         importancias = modelo_data.get("importancias", {})
 
         for var, imp in importancias.items():
+
             filas_importancias.append({
                 "Modelo": nombre_modelo,
                 "Variable": var,
@@ -828,7 +866,8 @@ def crear_excel_estimaciones_teoricas(
     config=None
 ):
     """
-    Crea un Excel SOLO con la tabla de estimaciones ML.
+    Crea un Excel SOLO con la tabla de estimaciones.
+    No mete importancias, correlaciones ni configuración.
     """
 
     output = io.BytesIO()
@@ -838,6 +877,36 @@ def crear_excel_estimaciones_teoricas(
             writer,
             index=False,
             sheet_name="Estimaciones"
+        )
+
+    output.seek(0)
+
+    return output
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df_estim.to_excel(
+            writer,
+            index=False,
+            sheet_name="Estimaciones"
+        )
+
+        df_importancias.to_excel(
+            writer,
+            index=False,
+            sheet_name="Importancias ML"
+        )
+
+        df_correlaciones.to_excel(
+            writer,
+            index=False,
+            sheet_name="Correlaciones"
+        )
+
+        pd.DataFrame([config]).to_excel(
+            writer,
+            index=False,
+            sheet_name="Configuracion"
         )
 
     output.seek(0)
@@ -3659,13 +3728,13 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
     """
     Calcula la velocidad MPA automáticamente.
 
-    Usa:
+    Usa siempre:
     - Temperature
     - Acid Measurement
 
-    Y escoge la columna de velocidad según material:
-    - Carbon Steel
-    - 5 Cr / 5Cr / 5 % Cr
+    Y como velocidad usa:
+    - Carbon Steel si el material seleccionado es Carbon Steel
+    - 5 Cr si el material seleccionado contiene 5 o Cr
     """
 
     if df_mpa is None or df_mpa.empty:
@@ -3679,99 +3748,20 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
 
     df_tmp = df_mpa.copy()
 
-    def limpiar_col(c):
-        return (
-            str(c)
-            .strip()
-            .lower()
-            .replace("\n", " ")
-            .replace("_", " ")
-            .replace("-", " ")
-        )
+    col_temp = "Temperature"
+    col_tan = "Acid Measurement"
 
-    # =====================================================
-    # DETECTAR COLUMNA TEMPERATURA
-    # =====================================================
-
-    col_temp = None
-
-    for c in df_tmp.columns:
-        cl = limpiar_col(c)
-
-        if (
-            cl == "temperature"
-            or "temperature" in cl
-            or "temperatura" in cl
-            or cl in ["t", "temp"]
-        ):
-            col_temp = c
-            break
-
-    # =====================================================
-    # DETECTAR COLUMNA TAN / ACID MEASUREMENT
-    # =====================================================
-
-    col_tan = None
-
-    for c in df_tmp.columns:
-        cl = limpiar_col(c)
-
-        if (
-            cl == "acid measurement"
-            or cl == "acid measurements"
-            or "acid measurement" in cl
-            or "acid measurements" in cl
-            or cl == "tan"
-            or "tan" in cl
-            or "acidez" in cl
-        ):
-            col_tan = c
-            break
-
-    if col_temp is None or col_tan is None:
+    if col_temp not in df_tmp.columns or col_tan not in df_tmp.columns:
         return None
 
-    # =====================================================
-    # DETECTAR COLUMNA MATERIAL
-    # =====================================================
-
-    material_txt = limpiar_col(material)
-
-    col_material = None
+    material_txt = str(material).lower()
 
     if "5" in material_txt or "cr" in material_txt:
-
-        for c in df_tmp.columns:
-            cl = limpiar_col(c)
-            cl_sin_espacios = cl.replace(" ", "")
-
-            if (
-                cl == "5 cr"
-                or cl_sin_espacios == "5cr"
-                or "5 cr" in cl
-                or "5cr" in cl_sin_espacios
-                or "5 % cr" in cl
-                or "5%cr" in cl_sin_espacios
-            ):
-                col_material = c
-                break
-
+        col_material = "5 Cr"
     else:
+        col_material = "Carbon Steel"
 
-        for c in df_tmp.columns:
-            cl = limpiar_col(c)
-
-            if (
-                cl == "carbon steel"
-                or "carbon steel" in cl
-                or "carbon" in cl
-                or "acero carbono" in cl
-                or cl in ["cs", "c steel", "csteel"]
-            ):
-                col_material = c
-                break
-
-    if col_material is None:
+    if col_material not in df_tmp.columns:
         return None
 
     df_tmp[col_temp] = convertir_numero_mpa(df_tmp[col_temp])
@@ -3790,7 +3780,6 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
 
     valor = np.nan
 
-    # Interpolación lineal si se puede
     if len(df_tmp) >= 3:
         try:
             interpolador_lineal = LinearNDInterpolator(
@@ -3808,7 +3797,6 @@ def buscar_velocidad_mas_cercana(df_mpa, temp, tan, material):
         except Exception:
             valor = np.nan
 
-    # Fallback: punto más cercano
     if pd.isna(valor):
         try:
             interpolador_cercano = NearestNDInterpolator(
@@ -6844,16 +6832,16 @@ with tabs[4]:
     
         st.plotly_chart(fig_best, use_container_width=True, key="mejor_modelo")
         # =====================================================
-        # GENERADOR TEÓRICO DE VELOCIDADES ML
+        # GENERADOR TEÓRICO DE VELOCIDADES ML + MPA
         # =====================================================
         
         st.markdown("---")
-        st.subheader("Generador teórico de velocidades ML")
+        st.subheader("Generador teórico de velocidades ML / MPA")
         
         st.caption(
-            "Genera una tabla de estimaciones usando SOLO el modelo ML. "
-            "Seleccionas qué variables del modelo quieres variar; las demás "
-            "se mantienen en su valor mediano."
+            "Genera una tabla de estimaciones variando todas las variables que selecciones. "
+            "Por ejemplo: TAN, temperatura, S, caudal, carga, etc. "
+            "Las variables no seleccionadas se mantienen en su valor mediano."
         )
         
         df_base_estimador = df_comp.copy()
@@ -6862,65 +6850,19 @@ with tabs[4]:
             df_base_estimador["Velocidad experimental"] = df_base_estimador["Media velocidades"]
         
         # =====================================================
-        # VARIABLES DISPONIBLES PARA EL GENERADOR
-        # SOLO VARIABLES DE PROCESO REALES
+        # VARIABLES DE PROCESO DISPONIBLES PARA ITERAR
+        # Solo saldrán columnas del archivo de proceso
         # =====================================================
         
-        def es_columna_proceso_valida_para_generador(col):
-            """
-            Devuelve True solo si la columna parece una variable de proceso real.
-            Excluye velocidades, MPA, diferencias, calidad, fechas, estados, etc.
-            """
+        cols_numericas_estimador = []
         
-            cl = str(col).strip().lower()
-        
-            palabras_prohibidas = [
-                "velocidad",
-                "media velocidades",
-                "velocidad experimental",
-                "velocidad esperada",
-                "velocidad teorica",
-                "velocidad teórica",
-                "velocidad mpa",
-                "velocidad ml",
-                "dif",
-                "diferencia",
-                "mpa",
-                "material",
-                "calidad",
-                "r2",
-                "segmento",
-                "refineria",
-                "refinería",
-                "inicio",
-                "fin",
-                "fecha",
-                "dias",
-                "días",
-                "estado",
-                "sonda",
-                "hoja",
-                "crudo",
-                "especies",
-                "coef",
-                "desviacion",
-                "desviación",
-                "std"
-            ]
-        
-            if any(p in cl for p in palabras_prohibidas):
-                return False
-        
-            return True
-        
-        
-        # 1) Variables de proceso reales guardadas al leer el Excel de proceso
+        # 1) Intentar coger las variables de proceso de la refinería activa
         vars_proceso_ref = []
         
         if "ref_data_modelo" in locals() and isinstance(ref_data_modelo, dict):
             vars_proceso_ref = ref_data_modelo.get("vars_proceso", [])
         
-        if not vars_proceso_ref and "ref_id_modelo_activo" in locals():
+        elif "ref_id_modelo_activo" in locals():
             vars_proceso_ref = (
                 st.session_state
                 .get("refinerias", {})
@@ -6928,37 +6870,30 @@ with tabs[4]:
                 .get("vars_proceso", [])
             )
         
+        # 2) Fallback: si por lo que sea no existen vars_proceso,
+        # reconstruirlas desde las medias de los segmentos guardados
         if not vars_proceso_ref:
-            vars_proceso_ref = st.session_state.get("vars_proceso", [])
+            posibles_vars = set()
         
+            for _, data_proc in st.session_state.get("processed_sheets", {}).items():
+                for seg in data_proc.get("segmentos_validos", []):
+                    medias = seg.get("medias", {})
         
-        # 2) Features reales del modelo ML
-        features_usadas = []
+                    if isinstance(medias, pd.Series):
+                        posibles_vars.update(list(medias.index))
         
-        for _, modelo_data in modelos.items():
-            for f in obtener_columnas_modelo(modelo_data):
-                if f not in features_usadas:
-                    features_usadas.append(f)
+                    elif isinstance(medias, dict):
+                        posibles_vars.update(list(medias.keys()))
         
+            vars_proceso_ref = sorted(posibles_vars)
         
-        # 3) El generador SOLO debe permitir:
-        #    - columnas que estén en vars_proceso_ref
-        #    - columnas que estén en df_base_estimador
-        #    - columnas numéricas
-        #    - columnas usadas realmente por el ML
-        #    - columnas que no sean velocidad/MPA/calidad/etc.
-        
-        opciones_iteracion = []
-        
+        # 3) Quedarse SOLO con variables de proceso que estén en df_comp y sean numéricas
         for c in vars_proceso_ref:
         
             if c not in df_base_estimador.columns:
                 continue
         
-            if c not in features_usadas:
-                continue
-        
-            if not es_columna_proceso_valida_para_generador(c):
+            if "Calidad" in str(c):
                 continue
         
             serie_num = pd.to_numeric(
@@ -6966,65 +6901,146 @@ with tabs[4]:
                 errors="coerce"
             )
         
-            if serie_num.notna().sum() < 2:
-                continue
+            if serie_num.notna().sum() > 0:
+                cols_numericas_estimador.append(c)
         
-            if serie_num.nunique(dropna=True) <= 1:
-                continue
-        
-            opciones_iteracion.append(c)
-        
-        
-        # 4) Eliminar duplicados conservando orden
-        opciones_iteracion = list(dict.fromkeys(opciones_iteracion))
-        
-        
-        if not opciones_iteracion:
-            st.warning(
-                "No hay variables de proceso válidas para el generador. "
-                "El modelo ML debe estar entrenado con variables de proceso como T, TAN, S, Caudal, Carga, etc."
-            )
-        
-            with st.expander("Diagnóstico de variables"):
-                st.write("Variables de proceso detectadas:", vars_proceso_ref)
-                st.write("Variables usadas por el modelo ML:", features_usadas)
-                st.write("Columnas disponibles en df_comp:", list(df_base_estimador.columns))
-        
-            st.stop()
-        
-        
-        # 5) Selección por defecto: variables de proceso típicas
-        default_iteracion = []
-        
-        for c in opciones_iteracion:
-        
-            cl = str(c).lower()
-        
+        # 4) Asegurar alias importantes si existen en df_comp
+        for alias in ["T", "TAN", "S"]:
             if (
-                "tan" in cl
-                or "temperatura" in cl
-                or "temperature" in cl
-                or "temp" in cl
-                or "azufre" in cl
-                or cl.strip() == "s"
-                or "s |" in cl
-                or "| s" in cl
-                or "caudal" in cl
-                or "flow" in cl
-                or "carga" in cl
-                or "presion" in cl
-                or "presión" in cl
-                or "pressure" in cl
+                alias in df_base_estimador.columns
+                and alias not in cols_numericas_estimador
+                and pd.to_numeric(df_base_estimador[alias], errors="coerce").notna().sum() > 0
             ):
-                default_iteracion.append(c)
+                cols_numericas_estimador.append(alias)
         
-        default_iteracion = [
-            c for c in default_iteracion
-            if c in opciones_iteracion
-        ]
+        cols_numericas_estimador = list(dict.fromkeys(cols_numericas_estimador))
         
-        if not default_iteracion:
-            default_iteracion = opciones_iteracion
+        if not cols_numericas_estimador:
+            st.warning("No hay columnas numéricas para generar estimaciones teóricas.")
+        
+        else:
+        
+            def buscar_columna_estimador_automatica(columnas, tipo):
+        
+                columnas = list(columnas)
+            
+                if tipo == "temp":
+                    prioridad_exacta = ["T", "Temperature", "Temperatura"]
+                    palabras = [
+                        "temperature",
+                        "temperatura",
+                        "temp",
+                        "t salida",
+                        "t entrada",
+                        "entrada",
+                        "salida"
+                    ]
+            
+                else:
+                    prioridad_exacta = ["TAN", "Acid Measurement", "Acid Measurements"]
+                    palabras = [
+                        "tan",
+                        "acid measurement",
+                        "acid measurements",
+                        "acid",
+                        "acidez"
+                    ]
+            
+                for nombre in prioridad_exacta:
+                    if nombre in columnas:
+                        return nombre
+            
+                for c in columnas:
+                    cl = str(c).lower()
+                    if any(p in cl for p in palabras):
+                        return c
+            
+                return None
+            
+            
+            col_temp_estimador = buscar_columna_estimador_automatica(
+                cols_numericas_estimador,
+                "temp"
+            )
+            
+            col_tan_estimador = buscar_columna_estimador_automatica(
+                cols_numericas_estimador,
+                "tan"
+            )
+            
+            if col_temp_estimador is None:
+                st.warning(
+                    "No se ha encontrado automáticamente la columna de temperatura. "
+                    "Debe llamarse T, Temperature, Temperatura o similar."
+                )
+            
+            if col_tan_estimador is None:
+                st.warning(
+                    "No se ha encontrado automáticamente la columna TAN/acidez. "
+                    "Debe llamarse TAN, Acid Measurement, Acid Measurements o similar."
+                )
+        
+            # =====================================================
+            # VARIABLES USADAS POR EL ML
+            # =====================================================
+        
+            features_usadas = []
+        
+            for _, modelo_data in modelos.items():
+                for f in obtener_columnas_modelo(modelo_data):
+                    if f not in features_usadas:
+                        features_usadas.append(f)
+        
+            # Solo permitir variables de proceso.
+            # Si además el modelo las usa, mejor.
+            opciones_iteracion = [
+                c for c in cols_numericas_estimador
+                if c in features_usadas
+            ]
+            
+            # Si el modelo no trae features bien guardadas, permitir todas las variables de proceso
+            if not opciones_iteracion:
+                opciones_iteracion = cols_numericas_estimador
+        
+            default_iteracion = []
+
+            for c in opciones_iteracion:
+            
+                cl = str(c).lower()
+            
+                if (
+                    c == col_temp_estimador
+                    or c == col_tan_estimador
+                    or "tan" in cl
+                    or "temperatura" in cl
+                    or "temperature" in cl
+                    or "temp" in cl
+                    or "azufre" in cl
+                    or cl.strip() == "s"
+                    or "s |" in cl
+                    or "| s" in cl
+                    or "caudal" in cl
+                    or "flow" in cl
+                    or "carga" in cl
+                ):
+                    default_iteracion.append(c)
+            
+            default_iteracion = [
+                c for c in default_iteracion
+                if c in opciones_iteracion
+            ]
+            
+            if not default_iteracion:
+                default_iteracion = [
+                    c for c in [col_temp_estimador, col_tan_estimador]
+                    if c in opciones_iteracion
+                ]
+        
+            if not default_iteracion:
+                default_iteracion = [
+                    c for c in [col_temp_estimador, col_tan_estimador]
+                    if c in opciones_iteracion
+                ]
         
             vars_iterar = st.multiselect(
                 "Variables que quieres variar en el Excel",
@@ -7032,6 +7048,18 @@ with tabs[4]:
                 default=default_iteracion,
                 key="estimador_vars_iterar"
             )
+        
+            if col_temp_estimador is not None and col_temp_estimador not in vars_iterar:
+                st.info(
+                    "La temperatura no está seleccionada para variar. "
+                    "MPA se calculará con la temperatura fija en la mediana."
+                )
+            
+            if col_tan_estimador is not None and col_tan_estimador not in vars_iterar:
+                st.info(
+                    "El TAN/acidez no está seleccionado para variar. "
+                    "MPA se calculará con el TAN fijo en la mediana."
+                )
         
             if not vars_iterar:
                 st.warning("Selecciona al menos una variable para variar.")
@@ -7041,6 +7069,7 @@ with tabs[4]:
                 st.markdown("### Rangos de iteración")
         
                 variables_iteracion = []
+        
                 total_combinaciones = 1
         
                 for var in vars_iterar:
@@ -7106,8 +7135,8 @@ with tabs[4]:
                     )
         
                 if st.button(
-                    "Generar Excel de estimaciones teóricas ML",
-                    key="btn_generar_estimaciones_teoricas_ml"
+                    "Generar Excel de estimaciones teóricas",
+                    key="btn_generar_estimaciones_teoricas"
                 ):
         
                     if not variables_iteracion:
@@ -7118,11 +7147,16 @@ with tabs[4]:
                         df_estim, df_importancias, df_correlaciones = generar_tabla_estimaciones_velocidad(
                             df_base=df_base_estimador,
                             modelos=modelos,
+                            df_mpa=st.session_state.get("df_mpa"),
+                            material=material_sel,
+                            col_temp=col_temp_estimador,
+                            col_tan=col_tan_estimador,
                             variables_iteracion=variables_iteracion
                         )
         
+        
                         if df_estim.empty:
-                            st.warning("No se ha podido generar la tabla de estimaciones ML.")
+                            st.warning("No se ha podido generar la tabla de estimaciones.")
         
                         else:
                             st.success(
@@ -7133,158 +7167,198 @@ with tabs[4]:
                             # EXCEL LIMPIO:
                             # Solo variables seleccionadas + velocidades ML
                             # =====================================================
-        
+                            
                             variables_excel = [
                                 str(cfg["variable"])
                                 for cfg in variables_iteracion
                                 if str(cfg["variable"]) in df_estim.columns
                             ]
-        
+                            
                             columnas_ml_excel = [
                                 c for c in df_estim.columns
                                 if str(c).startswith("Velocidad ML")
                             ]
-        
+                            
                             columnas_excel = list(
                                 dict.fromkeys(
                                     variables_excel + columnas_ml_excel
                                 )
                             )
-        
+                            
                             df_estim_excel = df_estim[columnas_excel].copy()
-        
+                            
                             st.dataframe(df_estim_excel.head(100))
+                                    
+                            config_estimador = {
+                                "Refineria": ref_data_modelo.get("nombre", ref_id_modelo_activo)
+                                if "ref_data_modelo" in locals()
+                                else "",
+                                "Material": material_sel,
+                                "Columna temperatura MPA": col_temp_estimador,
+                                "Columna TAN MPA": col_tan_estimador,
+                                "Variables iteradas": ", ".join(
+                                    [str(x["variable"]) for x in variables_iteracion]
+                                ),
+                                "Combinaciones": len(df_estim),
+                                "Modelos": ", ".join(modelos.keys())
+                            }
+                            
+                            for cfg in variables_iteracion:
+                                var = str(cfg["variable"])
+                            
+                                config_estimador[f"{var} min"] = cfg["min"]
+                                config_estimador[f"{var} max"] = cfg["max"]
+                                config_estimador[f"{var} pasos"] = cfg["pasos"]
         
                             excel_estimaciones = crear_excel_estimaciones_teoricas(
-                                df_estim_excel
+                                df_estim_excel,
+                                df_importancias,
+                                df_correlaciones,
+                                config_estimador
                             )
         
                             st.download_button(
-                                "Descargar Excel de estimaciones teóricas ML",
+                                "Descargar Excel de estimaciones teóricas",
                                 data=excel_estimaciones,
-                                file_name=f"estimaciones_teoricas_ml_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                file_name=f"estimaciones_teoricas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="download_estimaciones_teoricas_ml"
+                                key="download_estimaciones_teoricas_multivariable"
                             )
-        
                             # =====================================================
-                            # GRÁFICA ML: todas las curvas TAN
+                            # GRÁFICA TIPO CURVAS MPA / ML
                             # =====================================================
-        
-                            st.markdown("### Curvas de velocidad ML")
-        
-                            columnas_velocidad_graf = [
-                                c for c in df_estim.columns
-                                if str(c).startswith("Velocidad ML")
-                            ]
-        
-                            if not columnas_velocidad_graf:
-                                st.info("No hay columnas de velocidad ML para dibujar.")
-        
-                            elif col_temp_estimador is None or col_tan_estimador is None:
+                            
+                            st.markdown("### Curvas de velocidad tipo MPA / ML")
+                            
+                            if (
+                                col_temp_estimador is None
+                                or col_tan_estimador is None
+                                or col_temp_estimador not in df_estim.columns
+                                or col_tan_estimador not in df_estim.columns
+                            ):
                                 st.info(
-                                    "No se puede dibujar la gráfica tipo TAN vs temperatura porque "
-                                    "el modelo no contiene una variable reconocible como temperatura y otra como TAN."
+                                    "No se pueden dibujar curvas tipo MPA porque no se han detectado "
+                                    "temperatura y TAN/acidez en las variables de proceso."
                                 )
-        
-                            elif col_temp_estimador not in df_estim.columns or col_tan_estimador not in df_estim.columns:
-                                st.info(
-                                    "Para dibujar todas las curvas TAN, selecciona temperatura y TAN "
-                                    "como variables a variar en el generador."
-                                )
-        
+                            
                             else:
-        
-                                col_y_graf = st.selectbox(
-                                    "Velocidad ML a dibujar",
-                                    columnas_velocidad_graf,
-                                    index=columnas_velocidad_graf.index("Velocidad ML media")
-                                    if "Velocidad ML media" in columnas_velocidad_graf
-                                    else 0,
-                                    key="graf_curvas_col_y_ml"
-                                )
-        
-                                df_graf = df_estim.copy()
-        
-                                df_graf[col_temp_estimador] = pd.to_numeric(
-                                    df_graf[col_temp_estimador],
-                                    errors="coerce"
-                                )
-        
-                                df_graf[col_tan_estimador] = pd.to_numeric(
-                                    df_graf[col_tan_estimador],
-                                    errors="coerce"
-                                )
-        
-                                df_graf[col_y_graf] = pd.to_numeric(
-                                    df_graf[col_y_graf],
-                                    errors="coerce"
-                                )
-        
-                                df_graf = df_graf.dropna(
-                                    subset=[
-                                        col_temp_estimador,
-                                        col_tan_estimador,
-                                        col_y_graf
+                                import plotly.express as px
+                            
+                                columnas_velocidad_graf = [
+                                    c for c in [
+                                        "Velocidad MPA",
+                                        "Velocidad ML media",
+                                        "Velocidad ML - Random Forest"
                                     ]
-                                )
-        
-                                if df_graf.empty:
-                                    st.info("No hay datos suficientes para dibujar la gráfica.")
-        
+                                    if c in df_estim.columns
+                                ]
+                            
+                                if not columnas_velocidad_graf:
+                                    st.info("No hay columnas de velocidad calculadas para dibujar.")
+                            
                                 else:
-                                    # Si también varías S, caudal, carga, etc.,
-                                    # se promedia por cada pareja TAN-temperatura.
-                                    # Así aparecen todas las curvas TAN.
-                                    df_graf = (
-                                        df_graf
-                                        .groupby(
-                                            [col_tan_estimador, col_temp_estimador],
-                                            as_index=False
-                                        )[col_y_graf]
-                                        .mean()
+                                    col_y_graf = st.selectbox(
+                                        "Velocidad a dibujar",
+                                        columnas_velocidad_graf,
+                                        key="graf_curvas_col_y"
                                     )
-        
-                                    num_tan = df_graf[col_tan_estimador].nunique()
-        
-                                    if num_tan <= 1:
-                                        st.warning(
-                                            "Solo hay un valor de TAN en la tabla generada. "
-                                            "Para ver varias curvas, selecciona TAN como variable a variar "
-                                            "y pon más de 1 paso."
+                            
+                                    df_graf = df_estim.copy()
+                            
+                                    # Variables extra distintas de T y TAN.
+                                    # Si también has variado S, caudal, carga, etc.,
+                                    # aquí eliges un valor fijo para poder dibujar curvas 2D.
+                                    vars_extra_graf = [
+                                        cfg["variable"]
+                                        for cfg in variables_iteracion
+                                        if cfg["variable"] not in [col_temp_estimador, col_tan_estimador]
+                                    ]
+                            
+                                    for var_extra in vars_extra_graf:
+                            
+                                        if var_extra not in df_graf.columns:
+                                            continue
+                            
+                                        valores_extra = (
+                                            pd.to_numeric(df_graf[var_extra], errors="coerce")
+                                            .dropna()
+                                            .drop_duplicates()
+                                            .sort_values()
+                                            .tolist()
                                         )
-        
-                                    df_graf["TAN curva"] = (
-                                        "TAN " +
-                                        df_graf[col_tan_estimador].round(4).astype(str)
+                            
+                                        if not valores_extra:
+                                            continue
+                            
+                                        valor_default = valores_extra[len(valores_extra) // 2]
+                            
+                                        valor_sel = st.selectbox(
+                                            f"Valor fijo para {var_extra}",
+                                            valores_extra,
+                                            index=valores_extra.index(valor_default),
+                                            key=f"graf_curvas_fijo_{make_safe_slug(var_extra)}"
+                                        )
+                            
+                                        df_graf = df_graf[
+                                            np.isclose(
+                                                pd.to_numeric(df_graf[var_extra], errors="coerce"),
+                                                float(valor_sel),
+                                                equal_nan=False
+                                            )
+                                        ]
+                            
+                                    df_graf[col_temp_estimador] = pd.to_numeric(
+                                        df_graf[col_temp_estimador],
+                                        errors="coerce"
                                     )
-        
-                                    df_graf = df_graf.sort_values(
-                                        [col_tan_estimador, col_temp_estimador]
+                            
+                                    df_graf[col_tan_estimador] = pd.to_numeric(
+                                        df_graf[col_tan_estimador],
+                                        errors="coerce"
                                     )
-        
-                                    import plotly.express as px
-        
-                                    fig_curvas = px.line(
-                                        df_graf,
-                                        x=col_temp_estimador,
-                                        y=col_y_graf,
-                                        color="TAN curva",
-                                        markers=True,
-                                        title=f"{col_y_graf} en función de {col_temp_estimador} y {col_tan_estimador}"
+                            
+                                    df_graf[col_y_graf] = pd.to_numeric(
+                                        df_graf[col_y_graf],
+                                        errors="coerce"
                                     )
-        
-                                    fig_curvas.update_layout(
-                                        xaxis_title=col_temp_estimador,
-                                        yaxis_title=col_y_graf,
-                                        legend_title="Curvas TAN"
+                            
+                                    df_graf = df_graf.dropna(
+                                        subset=[col_temp_estimador, col_tan_estimador, col_y_graf]
                                     )
-        
-                                    st.plotly_chart(
-                                        fig_curvas,
-                                        use_container_width=True,
-                                        key="graf_curvas_estimaciones_ml"
-                                    )
+                            
+                                    if df_graf.empty:
+                                        st.info("No hay datos suficientes para dibujar la gráfica.")
+                            
+                                    else:
+                                        df_graf["TAN curva"] = (
+                                            "TAN " +
+                                            df_graf[col_tan_estimador].round(4).astype(str)
+                                        )
+                            
+                                        df_graf = df_graf.sort_values(
+                                            [col_tan_estimador, col_temp_estimador]
+                                        )
+                            
+                                        fig_curvas = px.line(
+                                            df_graf,
+                                            x=col_temp_estimador,
+                                            y=col_y_graf,
+                                            color="TAN curva",
+                                            markers=True,
+                                            title=f"{col_y_graf} en función de {col_temp_estimador} y {col_tan_estimador}"
+                                        )
+                            
+                                        fig_curvas.update_layout(
+                                            xaxis_title=col_temp_estimador,
+                                            yaxis_title=col_y_graf,
+                                            legend_title="Curvas"
+                                        )
+                            
+                                        st.plotly_chart(
+                                            fig_curvas,
+                                            use_container_width=True,
+                                            key="graf_curvas_estimaciones_teoricas"
+                                        )
         # IMPORTANCIA MPA
         imp_mpa = importancia_mpa(df_comp)
         
